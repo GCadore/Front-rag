@@ -1,0 +1,382 @@
+[
+ {
+  "name": "area:auditor",
+  "description": "",
+  "color": "ededed"
+ },
+ {
+  "name": "area:auth",
+  "description": "",
+  "color": "CCEEFF"
+ },
+ {
+  "name": "area:catalog",
+  "description": "Related to the Catalog Project Area",
+  "color": "CCFFEE"
+ },
+ {
+  "name": "area:core",
+  "description": "Related to the Core Backstage Framework",
+  "color": "EECCFF"
+ },
+ {
+  "name": "area:design-system",
+  "description": "UI components",
+  "color": "EEFFCC"
+ },
+ {
+  "name": "area:discoverability",
+  "description": "Related to the Discoverability Project Area",
+  "color": "FFCCEE"
+ },
+ {
+  "name": "area:documentation",
+  "description": "Improvements or additions to documentation",
+  "color": "FFEECC"
+ },
+ {
+  "name": "area:events",
+  "description": "Related to the Events Project Area",
+  "color": "FFDDDD"
+ },
+ {
+  "name": "area:framework",
+  "description": "",
+  "color": "ededed"
+ },
+ {
+  "name": "area:home",
+  "description": "",
+  "color": "FFDDFF"
+ },
+ {
+  "name": "area:kubernetes",
+  "description": "Related to the Kubernetes Project Area - not deploying Backstage with k8s.",
+  "color": "FFFFDD"
+ },
+ {
+  "name": "area:microsite",
+  "description": "Changes to backstage.io",
+  "color": "FFEEDD"
+ },
+ {
+  "name": "area:notifications",
+  "description": "Related to the Notifications Project Area",
+  "color": "FFDDEE"
+ },
+ {
+  "name": "area:openapi-tooling",
+  "description": "Related to the OpenAPI Tooling Project Area",
+  "color": "EEFFDD"
+ },
+ {
+  "name": "area:operations",
+  "description": "",
+  "color": "ededed"
+ },
+ {
+  "name": "area:permission",
+  "description": "Related to the Permission Project Area",
+  "color": "DDFFEE"
+ },
+ {
+  "name": "area:scaffolder",
+  "description": "Everything and all things related to the scaffolder project area",
+  "color": "bfdadc"
+ },
+ {
+  "name": "area:search",
+  "description": "",
+  "color": "ededed"
+ },
+ {
+  "name": "area:storybook",
+  "description": "",
+  "color": "ededed"
+ },
+ {
+  "name": "area:techdocs",
+  "description": "Related to the TechDocs Project Area",
+  "color": "FFDDCC"
+ },
+ {
+  "name": "area:tooling",
+  "description": "",
+  "color": "ededed"
+ },
+ {
+  "name": "BEP",
+  "description": "Backstage Enhancement Proposals",
+  "color": "ffffff"
+ },
+ {
+  "name": "contribfest",
+  "description": "",
+  "color": "ffffff"
+ },
+ {
+  "name": "dependencies",
+  "description": "Pull requests that update a dependency file",
+  "color": "ffffff"
+ },
+ {
+  "name": "domain:a11y",
+  "description": "Improvements to accessibility",
+  "color": "888888"
+ },
+ {
+  "name": "domain:backend",
+  "description": "",
+  "color": "999999"
+ },
+ {
+  "name": "domain:design",
+  "description": "",
+  "color": "aaaaaa"
+ },
+ {
+  "name": "domain:docs",
+  "description": "",
+  "color": "bbbbbb"
+ },
+ {
+  "name": "domain:web",
+  "description": "",
+  "color": "cccccc"
+ },
+ {
+  "name": "frontend-system",
+  "description": "",
+  "color": "A7B031"
+ },
+ {
+  "name": "good first issue",
+  "description": "Good for newcomers",
+  "color": "66ff77"
+ },
+ {
+  "name": "help wanted",
+  "description": "",
+  "color": "ededed"
+ },
+ {
+  "name": "integration:aws",
+  "description": "",
+  "color": "4444ff"
+ },
+ {
+  "name": "integration:azure",
+  "description": "",
+  "color": "4466ff"
+ },
+ {
+  "name": "integration:bitbucket-cloud",
+  "description": "",
+  "color": "4488ff"
+ },
+ {
+  "name": "integration:bitbucket-server",
+  "description": "",
+  "color": "44aaff"
+ },
+ {
+  "name": "integration:gcp",
+  "description": "",
+  "color": "6644ff"
+ },
+ {
+  "name": "integration:gerrit",
+  "description": "",
+  "color": "6666ff"
+ },
+ {
+  "name": "integration:gitea",
+  "description": "",
+  "color": "6688ff"
+ },
+ {
+  "name": "integration:github",
+  "description": "",
+  "color": "66aaff"
+ },
+ {
+  "name": "integration:gitlab",
+  "description": "",
+  "color": "8844ff"
+ },
+ {
+  "name": "integration:other",
+  "description": "",
+  "color": "aaaaff"
+ },
+ {
+  "name": "javascript",
+  "description": "Pull requests that update javascript code",
+  "color": "afa25c"
+ },
+ {
+  "name": "needs:bep",
+  "description": "",
+  "color": "ff99cc"
+ },
+ {
+  "name": "needs:direction",
+  "description": "Bring up for discussion during next sync",
+  "color": "99ff33"
+ },
+ {
+  "name": "needs:discussion",
+  "description": "",
+  "color": "99ff99"
+ },
+ {
+  "name": "needs:more-info",
+  "description": "Issues that need more refinement so that they are easier to pick up",
+  "color": "ff66cc"
+ },
+ {
+  "name": "needs:motivation",
+  "description": "",
+  "color": "ff6699"
+ },
+ {
+  "name": "needs:repro",
+  "description": "",
+  "color": "ff3399"
+ },
+ {
+  "name": "needs:triage",
+  "description": "",
+  "color": "66ff33"
+ },
+ {
+  "name": "needs:unblock",
+  "description": "",
+  "color": "33ff99"
+ },
+ {
+  "name": "no stale",
+  "description": "These issues will not be closed due to going stale",
+  "color": "cccccc"
+ },
+ {
+  "name": "priority:contrib-needed",
+  "description": "Help/Contributions wanted from community members",
+  "color": "FBCA84"
+ },
+ {
+  "name": "priority:contrib-welcome",
+  "description": "",
+  "color": "FBCA04"
+ },
+ {
+  "name": "priority:critical",
+  "description": "",
+  "color": "B60205"
+ },
+ {
+  "name": "priority:roadmap",
+  "description": "",
+  "color": "D93F0B"
+ },
+ {
+  "name": "reviewer-approved",
+  "description": "The pull request has been approved by a member of the reviewers group and has much higher priority.",
+  "color": "168700"
+ },
+ {
+  "name": "size:huge",
+  "description": "Huge pull requests receive a lower priority for reviews.",
+  "color": "ffaaaa"
+ },
+ {
+  "name": "size:large",
+  "description": "Large pull requests receive a slightly lower priority for reviews.",
+  "color": "eebbaa"
+ },
+ {
+  "name": "size:medium",
+  "description": "Medium-sized pull requests receive no change in priority for reviews.",
+  "color": "ccccaa"
+ },
+ {
+  "name": "size:small",
+  "description": "Small pull requests receive a slightly higher priority for reviews.",
+  "color": "bbeeaa"
+ },
+ {
+  "name": "size:tiny",
+  "description": "Tiny pull requests receive a higher priority for reviews.",
+  "color": "aaffaa"
+ },
+ {
+  "name": "snyk-vulnerability",
+  "description": "",
+  "color": "ededed"
+ },
+ {
+  "name": "stale",
+  "description": "",
+  "color": "ffffff"
+ },
+ {
+  "name": "type:bug",
+  "description": "Something isn't working",
+  "color": "ff0000"
+ },
+ {
+  "name": "type:docs",
+  "description": "",
+  "color": "ff00ff"
+ },
+ {
+  "name": "type:maintenance",
+  "description": "Upgrading dependency versions",
+  "color": "ffff00"
+ },
+ {
+  "name": "type:suggestion",
+  "description": "New feature or request",
+  "color": "00ffff"
+ },
+ {
+  "name": "waiting-for:author",
+  "description": "Changes have been requested and the PR will not receive a review until the changes are made.",
+  "color": "fbca04"
+ },
+ {
+  "name": "waiting-for:decision",
+  "description": "The PR has been marked as more complex and needs a decision from the owners.",
+  "color": "d93f0b"
+ },
+ {
+  "name": "waiting-for:merge",
+  "description": "The PR has been approved and is awaiting merge.",
+  "color": "5319e7"
+ },
+ {
+  "name": "waiting-for:review",
+  "description": "The PR needs a review and will be visible in the review queue unless already assigned an owner.",
+  "color": "006b75"
+ },
+ {
+  "name": "workflow:after-release",
+  "description": "This is a bit too scary to merge until after the next release",
+  "color": "ff5566"
+ },
+ {
+  "name": "workflow:after-vacations",
+  "description": "Some of the maintainers are away, let's look at this after the vacations",
+  "color": "ff8899"
+ },
+ {
+  "name": "workflow:before-release",
+  "description": "",
+  "color": "ff3344"
+ },
+ {
+  "name": "workflow:do-not-merge",
+  "description": "",
+  "color": "ff6677"
+ }
+]
