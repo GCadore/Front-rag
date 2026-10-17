@@ -53,7 +53,7 @@ class Settings:
     labels_path: Path | None = None
     log_path: Path = Path("logs/requests.jsonl")
     prompts_dir: Path = BACKEND_DIR / "prompts"
-    llm_timeout_s: float = 120.0
+    llm_timeout_s: float = 120.0  # LLM_TIMEOUT_S; no Modal é 300 pra esperar a partida a frio do vLLM
     config: dict[str, Any] = field(default_factory=dict)
     min_score: dict[str, float | None] = field(default_factory=dict)
 
@@ -167,6 +167,7 @@ def load_settings() -> Settings:
         llm_base_url=os.getenv("LLM_BASE_URL", "http://localhost:11434/v1"),
         llm_api_key=os.getenv("LLM_API_KEY", "ollama"),
         llm_model=os.getenv("LLM_MODEL", "qwen2.5:7b"),
+        llm_timeout_s=_env_float("LLM_TIMEOUT_S") or 120.0,
         rag_api_key=os.getenv("RAG_API_KEY", ""),
         embed_device=os.getenv("EMBED_DEVICE", "cuda"),
         enable_reranker=_env_bool("ENABLE_RERANKER", True),

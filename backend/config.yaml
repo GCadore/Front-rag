@@ -1,0 +1,263 @@
+# Configuração única do pipeline de preparação de dados (RAG para triagem — Backstage).
+# Todos os scripts leem este arquivo. Caminhos relativos são relativos à pasta do projeto.
+
+repo:
+  owner: backstage
+  name: backstage
+  branch: master
+
+# Data de corte T (UTC). Tudo criado em T ou depois fica fora do índice e pode virar teste.
+# Padrão: lançamento do Qwen3.6-27B (22/04/2026). Pode ser sobrescrito pela variável RAG_CUTOFF.
+cutoff: "2026-04-22T00:00:00Z"
+
+paths:
+  data: data
+  raw: data/raw
+  repo_clone: data/raw/repo
+  clean: data/clean
+  documents: data/documents
+  chunks: data/chunks/chunks.jsonl
+  index: data/index
+  testset: data/testset
+  reports: data/reports
+  addons: data/addons          # fontes extras (04b_addon_sources.py), uma pasta por fonte
+
+collect:
+  # Coleta completa: endpoints REST "issues" e "issues/comments" do repositório, paginados
+  # por cursor (since + sort=updated), com retomada. Precisa de GITHUB_TOKEN.
+  include_review_comments: false   # comentários de revisão inline (código) dos PRs
+  per_page: 100
+  pages_per_cursor: 10             # a cada N páginas o cursor "since" avança
+  max_rate_limit_wait_s: 3900      # espera máxima quando o limite de requisições acaba
+  # Amostra (modo --sample): via Search API + comentários item a item.
+  sample:
+    corpus_issues: 30
+    corpus_prs: 40
+    test_issues: 12
+    reserve_core_requests: 1       # não gasta as últimas N requisições do limite "core"
+
+git:
+  # Pastas trazidas no checkout esparso (docs + templates de issue/PR para limpeza).
+  sparse_paths: ["docs", ".github"]
+
+clean:
+  bot_logins:
+    - renovate
+    - renovate-bot
+    - changeset-bot
+    - github-actions
+    - dependabot
+    - backstage-goalie
+    - backstage-service
+    - backstage-bot
+    - codecov
+    - netlify
+    - vercel
+    - linux-foundation-easycla
+    - stale
+    - allcontributors
+    - sonarcloud
+    - socket-security
+    - copilot-pull-request-reviewer
+    - copilot-swe-agent
+  # Comentários de baixo valor (comparação depois de normalizar: minúsculas, sem pontuação/emoji)
+  low_value_comments:
+    - "+1"
+    - "same"
+    - "same here"
+    - "same issue"
+    - "me too"
+    - "bump"
+    - "any update"
+    - "any updates"
+    - "any news"
+    - "thanks"
+    - "thank you"
+    - "lgtm"
+  # Seções de formulário de issue sem conteúdo técnico (removidas inteiras)
+  meta_sections:
+    - "📜 Issue Labels"
+    - "Have you read the Code of Conduct?"
+    - "Are you willing to submit PR?"
+  min_pr_body_chars: 30            # PR sem descrição útil (depois da limpeza) é descartado
+  # Remoção estatística de boilerplate: linha que aparece em >= ratio dos itens (e >= min_count)
+  boilerplate_line_ratio: 0.3
+  boilerplate_line_min_count: 5
+  # Os 217 changelogs automáticos (docs/releases/*-changelog.md) geram ~37 mil chunks curtos
+  # (93% do índice na amostra) e repetem os CHANGELOG.md dos pacotes. Ficam fora por padrão;
+  # as 51 notas de versão escritas à mão (docs/releases/vX.Y.0.md) continuam no índice.
+  # Para incluir tudo: docs_exclude_globs: []
+  # docs/.* são arquivos ocultos (ex.: .release-notes-template.md, um template sem conteúdo).
+  docs_exclude_globs: ["docs/releases/*-changelog.md", "docs/.*", "docs/**/.*"]
+
+chunk:
+  tokenizer: BAAI/bge-m3
+  chunk_tokens: 700                # alvo de tamanho para issues/PRs (inclui o cabeçalho)
+  overlap_ratio: 0.12              # sobreposição entre chunks consecutivos (10–15%)
+  doc_max_tokens: 800              # seção de doc/ADR maior que isso é subdividida
+  doc_min_tokens: 60               # seções muito curtas são unidas à seguinte
+  doc_heading_levels: 3            # corta docs em #, ## e ###
+  # Chunks com texto idêntico (ex.: páginas "--old" do sistema legado que repetem a nova)
+  # viram um só; os ids descartados ficam no metadado "duplicates" do chunk mantido.
+  drop_duplicate_texts: true
+  # Cabeçalho [TIPO #n] título | labels | estado no início de cada chunk de issue/PR.
+  # false = ablação sem cabeçalho (os docs/ADRs mantêm o caminho de títulos).
+  context_header: true
+  # Estratégia "logical" (variante index_logico): `python 04_chunk.py --strategy logical --out index_logico`.
+  # Não muda o índice base. Mesmas fontes do base (issues, PRs, comentários, docs, ADRs), mesmo T.
+  logical:
+    max_tokens: 1000             # teto por chunk, cabeçalho incluído (BGE-M3 corta em 1024)
+    comment_group_tokens: 1000   # comentários consecutivos agrupados até isto; nunca corta um comentário
+                                 # no meio, a não ser que ele sozinho passe do limite
+    doc_min_tokens: 120          # docs/ADRs: seções menores que isto são unidas às vizinhas
+    include_review_threads: false  # true = threads de revisão (raw/review_comments.jsonl) agrupadas por
+                                   # arquivo/thread no PR. false = mesmo conjunto de fontes do base
+
+embed:
+  model: BAAI/bge-m3
+  batch_size: 16
+  max_seq_length: 1024
+  chroma_collection: backstage_chunks
+  chroma_collection_enxuto: backstage_chunks_lean    # index_lean/chroma (usado pela API)
+  chroma_collection_logico: backstage_chunks_logico  # index_logico/chroma (usado pela API)
+  chroma_insert_batch: 2000
+
+bm25:
+  stopwords: en
+  stemmer: english
+
+retrieval:
+  # Usado pelo query_demo.py hoje e pelas etapas de busca/avaliação que vierem depois.
+  k: 5                 # quantos chunks voltam no final (densa e BM25 usam o mesmo k)
+  per_source_k: 5      # estratégia "melhores de cada fonte": k por tipo antes da fusão
+  rerank_candidates: 40  # se o reranker for usado: candidatos antes de cortar para k
+  k_values: [1, 3, 5, 10]   # varredura de k para o Recall@k (experimento E6)
+  fusion: per_source        # per_source = melhores de cada fonte fundidos | single = top-k único
+  hybrid_rrf: false         # opcional: fusão RRF densa + BM25 (terceiro braço)
+  rrf_k: 60                 # constante do RRF
+  reranker: null            # opcional: "BAAI/bge-reranker-v2-m3"
+
+testset:
+  # Issues reais criadas depois de T (a coleta vai até 17/10/2026). Antes: só fechadas e no máximo 100.
+  max_issues: 400
+  include_open: true        # issues ainda abertas também entram (o gabarito vem de links, não do fechamento)
+  min_body_words: 15        # primeiro post (sem o título) com pelo menos N palavras; senão a consulta é fraca
+  # Sinais de gabarito (ver 06_build_testset.py). Cada ref guarda signal + confidence (high/medium/low).
+  signals: [duplicate, thread, fix_pr_closes, fix_pr_body, fix_pr_files, fix_pr_comments, body_ref, cross_ref, fix_pr_review]
+  min_confidence: medium    # gabarito principal = refs com confiança >= isto. high sozinho dá só 44 consultas;
+                            # a fatia "conf:high" da avaliação mostra o resultado só com as de alta confiança
+  # Conjunto SECUNDÁRIO (pseudo-gabarito): duplicatas antes de T ("Duplicate of #B"), em testset_dups.jsonl.
+  # A consulta (issue A) está no índice: os chunks dela são excluídos na busca. Não misturar com o principal.
+  duplicates_secondary: {enabled: true, max: 300}
+  # Gabarito de classificação: labels com estes prefixos (as outras, como stale e needs:*, saem).
+  label_prefixes: ["area:", "type:"]
+  # Issues fechadas pelo bot de stale (state_reason = not_planned) costumam não ter resposta;
+  # true = tira do teste; false = mantém e marca (servem como casos "sem resposta").
+  exclude_not_planned: false
+  # Como o gabarito de recuperação é montado:
+  #   "thread"        = comportamento antigo: refs (#n, URLs, ADRs) só nos comentários da issue
+  #   "thread+fix_pr" = também segue o(s) PR(s) que corrigiram a issue e pega as refs do corpo,
+  #                     dos comentários e (se coletados) dos review comments desses PRs (1 salto a mais)
+  gold_mode: "thread+fix_pr"
+  # Tipos de referência aceitos no gabarito (doc = URLs backstage.io/docs, links/caminhos docs/*.md)
+  ref_types: [issue, pr, adr, doc]
+  # Seleção quando há mais candidatas que max_issues:
+  #   "prefer_gold"   = primeiro as que têm >= 1 ref no índice, depois as demais (por data)
+  #   "chronological" = comportamento antigo: as mais antigas depois de T
+  selection: prefer_gold
+  fix_pr:
+    # closing_keywords: "Fixes/Closes/Resolves #N" nos corpos dos PRs (raw/issues.jsonl, sem API)
+    # thread_refs:      PRs fora do índice citados na thread da issue
+    # graphql:          closedByPullRequestsReferences + eventos Closed/Connected/CrossReferenced
+    #                   (precisa de GITHUB_TOKEN; respostas em cache em raw/fix_links_graphql.json)
+    methods: [closing_keywords, thread_refs, graphql]
+    require_merged: true            # só PRs mergeados contam como "PR que corrigiu"
+    # CrossReferencedEvent: "will_close_only" (só os que fecham a issue), "all" ou "none"
+    cross_ref_policy: will_close_only
+    include_comments: true
+    include_review_comments: true   # usa raw/review_comments.jsonl, se existir
+    # Páginas de docs/ADRs que o PR de correção EDITOU (e que já existiam em T) entram no gabarito
+    # com provenance "fix_pr_files". 1 requisição REST por PR, com cache em raw/fix_pr_files.json.
+    include_changed_docs: true
+    changed_docs_max_per_pr: 5      # PR que edita mais docs que isso (edição em massa) não entra
+    graphql_batch: 20
+
+llm:
+  # Ainda não usado pelos scripts 01–07; documenta as decisões para as etapas de geração.
+  model: "Qwen3-8B (ou Qwen3.5-9B) Q4_K_M — local; GPU de 24 GB no RunPod se preciso"
+  temperature: 0
+  thinking: false
+  context_tokens: 8192     # fixo, igual com e sem RAG
+  output_fields: [classificacao, explicacao, citacoes]
+  citation_format: doc_id  # citacoes[] usam o doc_id do índice: adr-009, issue-1234, pr-5678, doc-...
+
+# --------------------------------------------------------------------------------------------
+# Fontes extras (add-ons) para a ablação de fontes (H3). Cada uma vira data/addons/<nome>/
+# chunks.jsonl com tipo próprio; só esses chunks novos são embutidos (05_embed_index.py --addon).
+# O índice base (chunks.jsonl) não muda.
+addons:
+  changelog:
+    globs: ["docs/releases/*-changelog.md"]   # os changelogs excluídos em clean.docs_exclude_globs
+  review:
+    # comentários inline de revisão (raw/review_comments.jsonl, coletado com
+    # `python 04b_addon_sources.py collect-reviews`). Filtros: criado antes de T, sem bots,
+    # sem "lgtm"/"+1", só PRs mergeados antes de T. doc_id = pr-N (mesmo documento do PR).
+    diff_context_lines: 3        # últimas linhas do diff_hunk mostradas antes do comentário (0 = nenhuma)
+    min_chars: 15
+  lean:
+    # Variante "menos informação" (EMBUTIDA à parte, não é filtro): issues e PRs só com título +
+    # primeiro post/descrição (sem comentários) e SEM a linha de cabeçalho; docs e ADRs iguais ao
+    # índice base (vetores reaproveitados). Fica em data/index_lean/ (chunks, embeddings, Chroma).
+    dir: data/index_lean
+    eval_type_suffix: "@lean"    # na avaliação os tipos viram issue@lean/pr@lean (ids com "lean:")
+  logico:
+    # Variante "chunking por unidade lógica" (04_chunk.py --strategy logical, ver chunk.logical).
+    # Todos os chunks são novos (docs/ADRs também mudam com a união de seções) e embutidos à parte.
+    dir: data/index_logico
+    eval_type_suffix: "@logico"  # tipos issue@logico, pr@logico, doc@logico, adr@logico
+  commit:
+    # mensagens de commit do snapshot git (antes de T), agrupadas por merge/squash na linha
+    # principal (--first-parent). Ligadas ao PR (#N) quando possível: doc_id = pr-N.
+    drop_trailers: ["Signed-off-by:", "Co-authored-by:", "Co-Authored-By:"]
+    drop_subject_regex: "^(Merge (branch|remote-tracking branch|pull request)|Revert \"Merge)"
+    min_chars: 20
+
+# Avaliação de recuperação (08_retrieve_eval.py)
+eval:
+  out_dir: data/reports/eval
+  k_values: [1, 3, 5, 10, 20]
+  ndcg_k: 10
+  candidates: 300            # chunks recuperados antes de deduplicar por documento
+  dense_backend: chroma      # chroma (filtro $in por tipo) | exact (numpy, cosseno exato)
+  # Coleção Chroma de avaliação (index/chroma_eval): os MESMOS vetores do índice (base + add-ons),
+  # sem recalcular nada, num único grafo HNSW para todas as configurações. ef_search maior que o
+  # padrão (100) porque pedimos `candidates` vizinhos com filtro por tipo.
+  chroma_collection_for_all: true
+  hnsw: {ef_construction: 200, ef_search: 600, max_neighbors: 32}
+  methods: [dense, bm25, hybrid]   # hybrid = RRF(densa, BM25) com retrieval.rrf_k
+  fusions: [single, per_source]    # single = top-k global | per_source = top por fonte fundido (RRF)
+  bootstrap: 2000
+  seed: 13
+  reference_config: all            # comparações pareadas (bootstrap) contra esta configuração
+  # Configurações de fontes. Tipos base: issue, pr, doc, adr. Add-ons: changelog, review, commit.
+  # Variantes embutidas comparadas lado a lado (tabela principal): nome → configuração de fontes
+  variants:
+    lean: lean
+    base: all
+    logico: logico
+    base+extras: all+everything
+  source_configs:
+    lean: [issue@lean, pr@lean, doc, adr]
+    logico: [issue@logico, pr@logico, doc@logico, adr@logico]
+    issues: [issue]
+    prs: [pr]
+    docs: [doc]
+    adrs: [adr]
+    issues+prs: [issue, pr]
+    docs+adrs: [doc, adr]
+    all: [issue, pr, doc, adr]
+    all+changelog: [issue, pr, doc, adr, changelog]
+    all+review: [issue, pr, doc, adr, review]
+    all+commit: [issue, pr, doc, adr, commit]
+    all+everything: [issue, pr, doc, adr, changelog, review, commit]
+

@@ -48,6 +48,7 @@ As de `.env.example` (seção 2 da spec), mais estas opcionais:
 | `LABELS_PATH` | `RAG_DATA_DIR/../labels.json`, depois `data/labels.json` | labels do repositório |
 | `LOG_DIR` | `logs` | onde fica `requests.jsonl` |
 | `PROMPTS_DIR` | `backend/prompts` | prompts `.txt` que sobrescrevem os padrões |
+| `LLM_TIMEOUT_S` | `120` (300 no `modal_app.py`) | quanto a API espera o LLM; com 300, a 1ª pergunta espera a partida a frio do vLLM em vez de voltar erro |
 | `DATA_DIR` | `/data` no Modal, `./data_full` local | raiz dos índices |
 | `MIN_SCORE_DENSE` / `MIN_SCORE_BM25` / `MIN_SCORE_RERANK` | sem valor | limiares do gate; têm prioridade sobre `guardrails.min_score.*` do config.yaml |
 

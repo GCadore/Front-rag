@@ -60,6 +60,7 @@ def build_services(settings: Settings | None = None) -> Services:
     return Services(
         settings=settings,
         retriever=build_retriever(settings),
+        # Timeout vem de LLM_TIMEOUT_S (300 no Modal): na partida a frio a 1ª pergunta espera em vez de dar erro
         llm=OpenAICompatLLM(settings.llm_base_url, settings.llm_api_key, settings.llm_model, settings.llm_timeout_s),
         labels=load_labels(settings),
         prompts=PromptStore(settings.prompts_dir, settings.config),

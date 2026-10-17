@@ -218,3 +218,25 @@ def test_compare_reports_llm_unavailable_per_config(client: TestClient, fake_llm
     fake_llm.fail = True
     results = client.post("/compare", json={"mode": "chat", "title": "Scaffolder", "configs": [RAG_CFG]}).json()["results"]
     assert results[0]["error"] == "llm_unavailable" and results[0]["retry"] is True and results[0]["status"] == 503
+
+
+# --------------------------- timeout do LLM ------------------------------- #
+def test_llm_timeout_comes_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    from rag.settings import load_settings
+
+    monkeypatch.delenv("LLM_TIMEOUT_S", raising=False)
+    assert load_settings().llm_timeout_s == 120.0
+    monkeypatch.setenv("LLM_TIMEOUT_S", "300")
+    assert load_settings().llm_timeout_s == 300.0
+
+
+def test_api_passes_env_timeout_to_llm_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("openai")
+    import api
+    import rag.indices
+
+    monkeypatch.setenv("LLM_TIMEOUT_S", "300")
+    monkeypatch.setattr(rag.indices, "build_retriever", lambda settings: None)
+    services = api.build_services()
+    assert services.llm.timeout_s == 300.0
+    assert services.llm.client.timeout == 300.0

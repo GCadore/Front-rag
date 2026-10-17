@@ -5,10 +5,13 @@ pydantic>=2.6
 python-dotenv>=1.0
 pyyaml>=6.0
 openai>=1.30
-numpy>=1.26
-# RAG (pesados: só no servidor com os dados)
-sentence-transformers>=3.0
-torch>=2.2
-chromadb>=0.5
-bm25s>=0.2
-PyStemmer>=2.2
+# RAG (pesados: só no servidor com os dados). Mesmas versões do pipeline (backstage-rag/requirements.txt):
+# o bm25s PRECISA ser o mesmo que gerou os índices salvos.
+numpy==2.5.4
+torch==2.14.1
+sentence-transformers==6.1.0
+transformers==5.20.1
+huggingface_hub==1.33.0
+bm25s==0.3.13
+PyStemmer==3.1.0
+chromadb==1.5.9   # opcional (DENSE_BACKEND=chroma); o padrão é numpy
