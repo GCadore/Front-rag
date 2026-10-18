@@ -2,7 +2,7 @@
 
 Os textos padrão estão aqui; para editar sem mexer no código, crie/edite
 `prompts/<nome>.txt` (ou `PROMPTS_DIR`) ou a chave `prompts.<nome>` do config.yaml.
-Nomes: chat_strict, chat_simple, triage_strict, triage_simple, triage_schema.
+Nomes: chat_strict, chat_simple, triage_strict, triage_simple, triage_schema, triage_examples.
 """
 from __future__ import annotations
 
@@ -43,6 +43,10 @@ DEFAULT_PROMPTS: dict[str, str] = {
     ),
 }
 
+from .triage_aids import TRIAGE_EXAMPLES  # noqa: E402
+
+DEFAULT_PROMPTS["triage_examples"] = TRIAGE_EXAMPLES
+
 HISTORY_LIMIT = 6  # mensagens anteriores incluídas no prompt do /chat
 
 
@@ -66,8 +70,8 @@ def format_context(hits: list["Hit"]) -> str:
     blocks = []
     for n, hit in enumerate(hits, start=1):
         meta = hit.metadata
-        number = meta.get("number")
-        ref = f"{meta.get('type', '')} #{number}" if number not in (None, "") else str(meta.get("type", ""))
+        number = hit.number  # None para docs/ADRs (number vazio ou -1)
+        ref = f"{meta.get('type', '')} #{number}" if number is not None else (hit.doc_id or str(meta.get("type", "")))
         header = f"[{n}] ({ref}) {meta.get('title', '')} - {meta.get('url', '')}".strip()
         blocks.append(f"{header}\n{hit.text.strip()}")
     return "\n\n".join(blocks)
@@ -100,14 +104,32 @@ def triage_messages(
     hits: list["Hit"] | None,
     labels: list[dict[str, Any]],
     strict: bool,
+    neighbors: list[dict[str, Any]] | None = None,
+    label_descriptions: bool = False,
 ) -> list[dict[str, str]]:
+    """Mensagens da triagem.
+
+    neighbors: labels reais das issues/PRs parecidas (TRIAGE_NEIGHBOR_LABELS), já filtrados contra vazamento.
+    label_descriptions: descrição de uma linha por label + exemplos resolvidos (TRIAGE_LABEL_DESCRIPTIONS).
+    """
+    from .triage_aids import format_neighbors, label_description
+
     system = prompts.get("triage_strict" if strict else "triage_simple") + "\n\n" + prompts.get("triage_schema")
-    label_lines = "\n".join(
-        f"- {lb['name']}" + (f": {lb['description']}" if lb.get("description") else "") for lb in labels
-    )
+    if label_descriptions:
+        label_lines = "\n".join(
+            f"- {lb['name']}" + (f": {d}" if (d := label_description(lb)) else "") for lb in labels
+        )
+    else:
+        label_lines = "\n".join(
+            f"- {lb['name']}" + (f": {lb['description']}" if lb.get("description") else "") for lb in labels
+        )
     parts = [f"LABELS PERMITIDAS:\n{label_lines}"]
+    if label_descriptions:
+        parts.append(prompts.get("triage_examples"))
     if hits is not None:
         parts.append(f"CONTEXTO:\n{format_context(hits) or '(nenhum trecho encontrado)'}")
+    if neighbors:
+        parts.append(format_neighbors(neighbors))
     parts.append(f"ISSUE NOVA:\nTítulo: {title}\n\n{body}")
     return [{"role": "system", "content": system}, {"role": "user", "content": "\n\n".join(parts)}]
 

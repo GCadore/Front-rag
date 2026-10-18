@@ -1,0 +1,65 @@
+# Exemplos para a Demonstração (saídas reais do front)
+
+Fonte: `testes/raw_busca2.jsonl`, que guarda as respostas reais do endpoint `/triage` (o mesmo caminho do front). Rodada busca2 (testset de 216 issues, todas criadas depois do corte T = 22/04/2026).
+Configurações usadas, que são as padrão atuais:
+- **base / (b)**: híbrida RRF (w=0,8, k=30) + labels dos vizinhos + descrições dos labels + guardrails, sem reranker.
+- **lógico / split**: a mesma configuração, com o split 6 issues + 4 docs, que é o padrão do índice lógico desde o deploy v16.
+
+No corpo das issues, `[ref]` marca as referências a issues e PRs que mascaramos para não entregar a resposta ao modelo.
+
+---
+
+## ✅ Sucesso 1: issue que pede algo novo (sugestão) + issues relacionadas que estavam mascaradas
+- **Issue:** #34070 "Allow More Flexible Scaffolder Customization Using the New Frontend System": https://github.com/backstage/backstage/issues/34070
+- **Trecho:** "Some users of the New Frontend System (NFS) have reported limitations regarding customization… Related issues highlight the need for: Customizing Template Groups ([ref], [ref]), Customizing the `TaskPageComponent` ([ref]), Providing a `formFields` prop ([ref])…"
+- **Saída (base/(b), 26,6 s):**
+  - labels `type:suggestion` (alta) e `area:scaffolder` (alta).
+  - related:
+    - #33439 "Allow adding formFields prop when overriding ScaffolderPage"
+    - #32776 "Expose grouping of software templates through New Frontend System"
+    - #31251 "New frontend: can't override template card in scaffolder-plugin"
+    - #32574 "Add support for custom step layouts in the new frontend system"
+- **Explicação (trecho):** "A issue nova propõe uma refatoração para permitir customização mais flexível do Scaffolder no New Frontend System (NFS)… mencionam explicitamente a necessidade de customizar `formFields`, `layouts`, `grouping` e `groups` [1][2][5]…"
+- **Gabarito:**
+  - labels `area:scaffolder` e `type:suggestion`.
+  - itens: #32776, #33206, #33439, #33749 e a doc "Software Template Configuration".
+- **Por quê:** os labels batem exatamente. Dois dos itens relacionados (#33439 e #32776) são justamente referências que a issue citava e que estavam mascaradas como `[ref]`, ou seja, o RAG reencontrou o histórico. O índice lógico/split deu o mesmo resultado.
+
+## ✅ Sucesso 2: bug com integração externa + mesma causa raiz no histórico
+- **Issue:** #34395 "Bug: `@backstage/integration@2.0.2` causes GitLab requests to fail with 406 Not Acceptable on self-hosted GitLab": https://github.com/backstage/backstage/issues/34395
+- **Trecho:** "In `@backstage/integration@2.0.2`, the `fetch` call inside `GitLabIntegration.createFetchStrategy()` had `mode: "same-origin"` removed… `undici` set request headers… that self-hosted GitLab… reject with HTTP 406… This breaks TechDocs…"
+- **Saída (lógico/split):**
+  - labels `type:bug`, `area:techdocs` e `integration:gitlab` (todos alta).
+  - related:
+    - #28190 "🐛 Bug Report: GitlabUrlReader not working since undici change"
+    - #20753 "TechDocs Not Working with Privately Self-Signed Self Hosted Gitlab"
+- **Explicação (trecho):** "…faz com que o `undici` adicione cabeçalhos CORS (como `Sec-Fetch-Mode: cors`) que o GitLab self-hosted rejeita com erro 406… O problema é idêntico ao relatado em [1]… o cabeçalho `sec-fetch-mode: cors` é identificado como a causa raiz…"
+- **Gabarito:** labels `area:techdocs`, `integration:gitlab` e `type:bug`; item #28190.
+- **Por quê:** acerta os 3 labels, incluindo `integration:*`, que é raro (integration:gitlab aparece em só 22 issues da base). O primeiro item relacionado é exatamente o do gabarito, com a mesma causa raiz, aberto em dezembro de 2024. Isso é a "memória de projeto" que a proposta prometia.
+- **Detalhes:**
+  - Na base/(b), o modelo acrescentou `needs:more-info`, que não está no gabarito.
+  - Na saída, #28190 aparece duas vezes em related; falta tirar duplicados. É uma melhoria pequena a fazer.
+
+## ❌ Erro 1: área errada, mas busca útil
+- **Issue:** #34022 "🪲Swagger UI deep linking not working": https://github.com/backstage/backstage/issues/34022
+- **Trecho:** "Deep linking to an endpoint when browsing an Open API definition is not working… the page doesn't scroll to the operation." No formulário, o autor marcou Project Area: **Catalog**.
+- **Saída (base/(b) e lógico/split, iguais):**
+  - labels `type:bug` e `area:openapi-tooling`.
+  - related: #28725 "Swagger deep linking broken after upgrading to 1.35", #32804 e #9345.
+- **Gabarito:** labels `area:catalog` e `type:bug`. Esta issue não tem itens no gabarito.
+- **Por quê:** a resposta é plausível, já que o Swagger fica no plugin de API docs, mas os mantenedores usam `area:catalog`. A ambiguidade está no próprio conjunto de labels, e o modelo ignorou o campo "Project Area" do formulário. A busca, por outro lado, trouxe a issue antiga com o mesmo bug (#28725). Ou seja: a recuperação acertou e a classificação errou.
+
+## ⚠️ Erro 2: citações fora do contexto, barradas pelos guardrails
+- **Issue:** #34747 "Scaffolder ListTasksPage search only works per page": https://github.com/backstage/backstage/issues/34747
+- **Trecho:** "Scaffolder ListTasksPage search only works per page and does not persist on new page load (table)." Project Area: **Search**.
+- **Saída (base/(b)):**
+  - labels `type:bug` e `area:scaffolder`.
+  - O modelo citou #30542, #32353 e #32271, que **não estavam nos trechos recuperados**. Os guardrails removeram essas citações e os itens relacionados (`removed.related = [30542, 32353, 32271]`), então related ficou vazio.
+  - Explicação depois da limpeza: "…Isso é confirmado como um bug conhecido em, onde a busca não aparece…". A frase ficou com buracos onde estavam as citações.
+- **Gabarito:** labels `area:scaffolder`, `area:search` e `type:bug`. Faltou `area:search`, um caso de várias áreas ao mesmo tempo.
+- **Por quê:** mostra o modelo inventando referências e a proteção funcionando. Na rodada (b) da bateria, as referências fora das fontes caíram de 22 para 0. No índice lógico/split, as mesmas issues vieram nos trechos e foram aceitas como related legítimas. Limitação: a explicação fica truncada, e o ideal seria reescrever a frase em vez de só apagar a citação.
+
+---
+Números de apoio:
+- Na busca2 (216 issues, 864 respostas), os guardrails removeram algo em: related 29, labels 14, citações 11, menções 4, docs 2.
+- Latência por triagem nas 864 respostas: mediana 22,5 s (p10 16,4 s; p90 29,9 s); houve um valor fora da curva de 327 s.

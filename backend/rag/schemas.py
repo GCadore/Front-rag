@@ -23,6 +23,16 @@ class RagConfig(BaseModel):
     reranker: bool = False
     guardrails: bool = True
     top_k: int | None = Field(default=None, ge=1, le=50)
+    # Ajudas da triagem; None = usa o padrão do servidor (TRIAGE_NEIGHBOR_LABELS / TRIAGE_LABEL_DESCRIPTIONS)
+    neighbor_labels: bool | None = None
+    label_descriptions: bool | None = None
+    # Reescrita da consulta pelo LLM antes da busca (QUERY_REWRITE) e votação de labels (TRIAGE_LABEL_VOTES)
+    query_rewrite: bool | None = None
+    label_votes: int | None = Field(default=None, ge=1, le=5)
+    # Busca 2: top-k separado por tipo, BM25 com título/labels reforçados, corte de related por score
+    split_types: bool | None = None
+    bm25_boost: bool | None = None
+    related_min_score: float | None = None
 
 
 class Message(BaseModel):
@@ -92,6 +102,7 @@ class RelatedItem(BaseModel):
     state: str
     reason: str
     score: float
+    dense_score: float | None = None  # cosseno do trecho (base do RELATED_MIN_SCORE com RELATED_SCORE_KIND=dense)
 
 
 class DocItem(BaseModel):
@@ -116,6 +127,11 @@ class TriageResponse(BaseModel):
     timings_ms: dict[str, int] = Field(default_factory=dict)
     refused: bool = False
     error: str | None = None
+    # Labels reais das issues/PRs parecidas que entraram no prompt (TRIAGE_NEIGHBOR_LABELS)
+    neighbor_labels: list[dict[str, Any]] | None = None
+    # Consulta usada na busca quando QUERY_REWRITE está ligado, e votos por label (TRIAGE_LABEL_VOTES > 1)
+    search_query: str | None = None
+    label_votes: dict[str, int] | None = None
 
 
 # --------------------------------------------------------------------------- #

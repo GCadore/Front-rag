@@ -1,0 +1,14 @@
+flowchart LR
+  subgraph OFF["Offline (preparação da base)"]
+    GH["GitHub backstage/backstage<br/>issues, PRs, comentários,<br/>docs, ADRs"] --> COL["Coleta + limpeza<br/>(bots, templates, corte T 22/04/2026,<br/>refs mascaradas no testset)"]
+    COL --> EMB["Embeddings BGE-M3 + BM25<br/>(GPU no Modal)"]
+    EMB --> VOL[("Índices Chroma no Modal Volume<br/>base · enxuto · lógico · base+extras")]
+  end
+  subgraph ON["Online (triagem)"]
+    FE["Front Next.js<br/>(issue nova: título + corpo)"] -->|"POST /triage"| API["Backend FastAPI no Modal (L4)<br/>busca híbrida RRF (w 0,8, k 30)<br/>split 6 issues + 4 docs no lógico<br/>labels dos vizinhos + descrições dos labels"]
+    API -->|"prompt: labels permitidas + exemplos<br/>+ CONTEXTO [1..k] + issue"| LLM["Qwen3.5-9B<br/>vLLM no Modal (A10G)"]
+    LLM -->|"JSON"| GR["Guardrails<br/>schema, labels permitidas,<br/>citações só do contexto"]
+    GR --> OUT["Triagem em JSON:<br/>labels + confiança, related,<br/>docs, explicação com [n]"]
+    OUT --> FE
+  end
+  VOL -.->|"leitura dos índices"| API

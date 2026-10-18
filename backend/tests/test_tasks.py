@@ -240,3 +240,36 @@ def test_api_passes_env_timeout_to_llm_client(monkeypatch: pytest.MonkeyPatch) -
     services = api.build_services()
     assert services.llm.timeout_s == 300.0
     assert services.llm.client.timeout == 300.0
+
+
+# --------------------------- relacionados sem duplicata -------------------- #
+def test_triage_related_and_docs_deduplicated_by_doc_id() -> None:
+    from rag.guardrails import guard_triage
+    from rag.retrieval import Hit
+    from rag.schemas import TriageLLMOutput
+
+    def hit(cid: str, doc_id: str, kind: str, idx: int, number: int | None = None) -> Hit:
+        meta = {"type": kind, "doc_id": doc_id, "chunk_index": idx, "title": doc_id, "url": f"https://x/{doc_id}"}
+        if number is not None:
+            meta["number"] = number
+        return Hit(cid, doc_id, "texto", meta, score=0.5)
+
+    # [1] e [3] são trechos não vizinhos da mesma issue; [4] e [5], da mesma doc
+    hits = [
+        hit("issue-28190-000", "issue-28190", "issue", 0, 28190),
+        hit("issue-20753-000", "issue-20753", "issue", 0, 20753),
+        hit("issue-28190-003", "issue-28190", "issue", 3, 28190),
+        hit("doc-techdocs-000", "doc-techdocs", "doc", 0),
+        hit("doc-techdocs-004", "doc-techdocs", "doc", 4),
+    ]
+    output = TriageLLMOutput.model_validate({
+        "related": [{"n": 1, "reason": "mesma causa"}, {"n": 3, "reason": "repetido"}, {"n": 2, "reason": "parecido"},
+                    {"id": "issue-28190", "reason": "pelo doc_id"}],
+        "docs": [{"n": 4}, {"n": 5}, {"n": 4}],
+    })
+    for enabled in (True, False):
+        res = guard_triage(output, hits, allowed_labels=set(), enabled=enabled)
+        assert [r["doc_id"] for r in res.related] == ["issue-28190", "issue-20753"]
+        assert res.related[0]["reason"] == "mesma causa"          # fica o primeiro citado
+        assert [d["doc_id"] for d in res.docs] == ["doc-techdocs"]
+        assert res.removed["related"] == [] and res.removed["docs"] == []  # duplicata não é "inventada"

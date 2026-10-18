@@ -224,6 +224,7 @@ def related_from_hit(n: int, hit: Hit, reason: str) -> dict[str, Any]:
         "state": str(meta.get("state", "")),
         "reason": reason,
         "score": round(float(hit.score), 4),
+        "dense_score": None if hit.dense_score is None else round(float(hit.dense_score), 4),
     }
 
 
@@ -277,7 +278,9 @@ def guard_triage(
 
     by_doc = {h.doc_id: n for n, h in enumerate(hits, start=1)}
     by_id = {cid: n for n, h in enumerate(hits, start=1) for cid in (h.chunk_ids or [h.id])}
-    seen_n: set[int] = set()
+    # Deduplica por documento: dois trechos não vizinhos da mesma issue (ex.: [1] e [3]
+    # da #28190) viram um item só, o primeiro que o modelo citou.
+    seen_related: set[str] = set()
     for rel in output.related:
         n = rel.n if valid_n(rel.n) else None
         if n is None and rel.id:
@@ -288,16 +291,20 @@ def guard_triage(
             else:
                 res.related.append(_unchecked_related(rel))
             continue
-        if n not in seen_n:
+        if hits[n - 1].doc_id not in seen_related:
             res.related.append(related_from_hit(n, hits[n - 1], rel.reason))
-            seen_n.add(n)
+            seen_related.add(hits[n - 1].doc_id)
 
-    seen_docs: set[int] = set()
+    seen_n: set[int] = set()
+    seen_docs: set[str] = set()
     for doc in output.docs:
-        if doc.n in seen_docs:
+        if doc.n in seen_n:
             continue
-        seen_docs.add(doc.n)
+        seen_n.add(doc.n)
         if valid_n(doc.n):
+            if hits[doc.n - 1].doc_id in seen_docs:
+                continue
+            seen_docs.add(hits[doc.n - 1].doc_id)
             res.docs.append(_doc_from_hit(doc.n, hits[doc.n - 1]))
         elif enabled:
             res.removed["docs"].append(f"[{doc.n}]")

@@ -91,6 +91,26 @@ class OpenAICompatLLM:
             raise LLMError("Resposta sem choices")
         return strip_think(resp.choices[0].message.content or "")
 
+    async def complete_n(
+        self, messages: list[dict[str, str]], n: int, *, temperature: float = 0.7, json_mode: bool = False
+    ) -> list[str]:
+        """N amostras numa requisição só (`n` do vLLM/OpenAI): o prompt é processado uma vez.
+        Usado pela votação de labels (TRIAGE_LABEL_VOTES)."""
+        kwargs: dict[str, Any] = {"response_format": {"type": "json_object"}} if json_mode else {}
+        try:
+            resp = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model=self.model, messages=messages, temperature=temperature, n=n,  # type: ignore[arg-type]
+                    max_tokens=self.max_tokens, extra_body=self.extra_body, **kwargs,
+                ),
+                timeout=self.timeout_s,
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise LLMError(f"{type(exc).__name__}: {exc}") from exc
+        if not resp.choices:
+            raise LLMError("Resposta sem choices")
+        return [strip_think(c.message.content or "") for c in resp.choices]
+
     async def stream(self, messages: list[dict[str, str]], *, temperature: float = 0.1) -> AsyncIterator[str]:
         deadline = time.monotonic() + self.timeout_s  # tempo total, não por chunk
         buffer, inside_think, started = "", False, False

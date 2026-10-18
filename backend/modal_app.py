@@ -98,6 +98,34 @@ image = (
             "MIN_SCORE_DENSE": MIN_SCORE_DENSE,
             "MIN_SCORE_RERANK": MIN_SCORE_RERANK,
             "MIN_SCORE_BM25": MIN_SCORE_BM25,
+            # Ajudas de precisão da triagem (rag/triage_aids.py); cada requisição pode sobrescrever no config
+            "TRIAGE_NEIGHBOR_LABELS": os.environ.get("TRIAGE_NEIGHBOR_LABELS", "true"),
+            "TRIAGE_LABEL_DESCRIPTIONS": os.environ.get("TRIAGE_LABEL_DESCRIPTIONS", "true"),
+            "TRIAGE_NEIGHBOR_CUTOFF": os.environ.get("TRIAGE_NEIGHBOR_CUTOFF", "2026-04-22T00:00:00Z"),
+            # Busca híbrida (varredura + confirmação de 17/10): RRF ponderado w_bm25=0.8, k=30, sem agrupar por doc.
+            # Agrupar (RETRIEVAL_GROUP_BY_DOC=true, + RETRIEVAL_CHUNKS_PER_DOC) melhora o ranking mas não a triagem.
+            "RRF_K": os.environ.get("RRF_K", "30"),
+            "RRF_W_BM25": os.environ.get("RRF_W_BM25", "0.8"),
+            "RETRIEVAL_GROUP_BY_DOC": os.environ.get("RETRIEVAL_GROUP_BY_DOC", "false"),
+            "RETRIEVAL_CHUNKS_PER_DOC": os.environ.get("RETRIEVAL_CHUNKS_PER_DOC", "3"),
+            # Reescrita da consulta e votação de labels (17/10): desligadas por padrão; a requisição pode ligar
+            "QUERY_REWRITE": os.environ.get("QUERY_REWRITE", "false"),
+            "QUERY_REWRITE_MODE": os.environ.get("QUERY_REWRITE_MODE", "fuse"),
+            "QUERY_REWRITE_WEIGHT": os.environ.get("QUERY_REWRITE_WEIGHT", "0.5"),
+            "QUERY_REWRITE_LISTS": os.environ.get("QUERY_REWRITE_LISTS", "dense"),
+            "TRIAGE_LABEL_VOTES": os.environ.get("TRIAGE_LABEL_VOTES", "1"),
+            "TRIAGE_VOTE_TEMPERATURE": os.environ.get("TRIAGE_VOTE_TEMPERATURE", "0.7"),
+            # Busca 2 (18/10): desligados por padrão; a requisição pode ligar (split_types, bm25_boost, related_min_score)
+            "RETRIEVAL_SPLIT_TYPES": os.environ.get("RETRIEVAL_SPLIT_TYPES", "false"),
+            # 18/10: split 6+4 ligado por padrão só no índice lógico (a requisição ainda decide)
+            "RETRIEVAL_SPLIT_TYPES_INDICES": os.environ.get("RETRIEVAL_SPLIT_TYPES_INDICES", "logico"),
+            "RETRIEVAL_SPLIT_K_ISSUES": os.environ.get("RETRIEVAL_SPLIT_K_ISSUES", "6"),
+            "RETRIEVAL_SPLIT_K_DOCS": os.environ.get("RETRIEVAL_SPLIT_K_DOCS", "4"),
+            "BM25_TITLE_BOOST": os.environ.get("BM25_TITLE_BOOST", "0"),
+            "BM25_LABEL_BOOST": os.environ.get("BM25_LABEL_BOOST", "0"),
+            "BM25_BOOST": os.environ.get("BM25_BOOST", "false"),
+            "RELATED_MIN_SCORE": os.environ.get("RELATED_MIN_SCORE", ""),
+            "RELATED_SCORE_KIND": os.environ.get("RELATED_SCORE_KIND", "dense"),
         }
     )
     .add_local_file(str(PROJECT / "data" / "labels.json"), "/root/data/labels.json")

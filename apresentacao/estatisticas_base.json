@@ -1,0 +1,535 @@
+{
+ "documentos_indexados": {
+  "issue": 7381,
+  "pr": 12112,
+  "doc": 424,
+  "adr": 15
+ },
+ "periodo": {
+  "issue": [
+   "2020-02-09",
+   "2026-04-20"
+  ],
+  "pr": [
+   "2020-02-03",
+   "2026-04-20"
+  ]
+ },
+ "issues_com_label": 6994,
+ "top_labels": {
+  "area:": [
+   [
+    "area:catalog",
+    906
+   ],
+   [
+    "area:scaffolder",
+    631
+   ],
+   [
+    "area:techdocs",
+    586
+   ],
+   [
+    "area:auth",
+    195
+   ],
+   [
+    "area:documentation",
+    191
+   ],
+   [
+    "area:kubernetes",
+    178
+   ],
+   [
+    "area:core",
+    144
+   ],
+   [
+    "area:framework",
+    77
+   ],
+   [
+    "area:permission",
+    66
+   ],
+   [
+    "area:search",
+    64
+   ]
+  ],
+  "type:": [
+   [
+    "type:bug",
+    3767
+   ],
+   [
+    "type:suggestion",
+    2319
+   ],
+   [
+    "type:maintenance",
+    17
+   ]
+  ],
+  "integration:": [
+   [
+    "integration:github",
+    25
+   ],
+   [
+    "integration:azure",
+    23
+   ],
+   [
+    "integration:gitlab",
+    22
+   ],
+   [
+    "integration:other",
+    16
+   ],
+   [
+    "integration:aws",
+    11
+   ],
+   [
+    "integration:bitbucket-server",
+    4
+   ],
+   [
+    "integration:gerrit",
+    1
+   ],
+   [
+    "integration:bitbucket-cloud",
+    1
+   ]
+  ]
+ },
+ "top15_labels_issue": [
+  [
+   "type:bug",
+   3767
+  ],
+  [
+   "type:suggestion",
+   2319
+  ],
+  [
+   "area:catalog",
+   906
+  ],
+  [
+   "area:scaffolder",
+   631
+  ],
+  [
+   "area:techdocs",
+   586
+  ],
+  [
+   "area:auth",
+   195
+  ],
+  [
+   "area:documentation",
+   191
+  ],
+  [
+   "area:kubernetes",
+   178
+  ],
+  [
+   "area:core",
+   144
+  ],
+  [
+   "area:framework",
+   77
+  ],
+  [
+   "area:permission",
+   66
+  ],
+  [
+   "area:search",
+   64
+  ],
+  [
+   "area:discoverability",
+   59
+  ],
+  [
+   "area:design-system",
+   56
+  ],
+  [
+   "area:tooling",
+   48
+  ]
+ ],
+ "palavras_por_documento": {
+  "issue": {
+   "mediana": 366,
+   "p10": 106,
+   "p90": 1128,
+   "media": 554.6
+  },
+  "pr": {
+   "mediana": 58,
+   "p10": 18,
+   "p90": 267,
+   "media": 119.3
+  },
+  "doc": {
+   "mediana": 664,
+   "p10": 170,
+   "p90": 1907,
+   "media": 942.9
+  },
+  "adr": {
+   "mediana": 345,
+   "p10": 117,
+   "p90": 496,
+   "media": 359.9
+  }
+ },
+ "issues_brutas": 8021,
+ "issues_brutas_bots": 389,
+ "issues_por_mes": {
+  "2020-02": 16,
+  "2020-03": 120,
+  "2020-04": 76,
+  "2020-05": 114,
+  "2020-06": 96,
+  "2020-07": 83,
+  "2020-08": 89,
+  "2020-09": 105,
+  "2020-10": 127,
+  "2020-11": 85,
+  "2020-12": 103,
+  "2021-01": 140,
+  "2021-02": 110,
+  "2021-03": 101,
+  "2021-04": 83,
+  "2021-05": 66,
+  "2021-06": 111,
+  "2021-07": 100,
+  "2021-08": 100,
+  "2021-09": 102,
+  "2021-10": 107,
+  "2021-11": 77,
+  "2021-12": 90,
+  "2022-01": 88,
+  "2022-02": 87,
+  "2022-03": 116,
+  "2022-04": 110,
+  "2022-05": 119,
+  "2022-06": 105,
+  "2022-07": 100,
+  "2022-08": 96,
+  "2022-09": 97,
+  "2022-10": 90,
+  "2022-11": 105,
+  "2022-12": 105,
+  "2023-01": 131,
+  "2023-02": 124,
+  "2023-03": 117,
+  "2023-04": 82,
+  "2023-05": 115,
+  "2023-06": 130,
+  "2023-07": 99,
+  "2023-08": 111,
+  "2023-09": 112,
+  "2023-10": 91,
+  "2023-11": 109,
+  "2023-12": 117,
+  "2024-01": 115,
+  "2024-02": 115,
+  "2024-03": 116,
+  "2024-04": 144,
+  "2024-05": 122,
+  "2024-06": 156,
+  "2024-07": 128,
+  "2024-08": 129,
+  "2024-09": 111,
+  "2024-10": 125,
+  "2024-11": 100,
+  "2024-12": 95,
+  "2025-01": 90,
+  "2025-02": 103,
+  "2025-03": 89,
+  "2025-04": 92,
+  "2025-05": 80,
+  "2025-06": 70,
+  "2025-07": 76,
+  "2025-08": 76,
+  "2025-09": 85,
+  "2025-10": 80,
+  "2025-11": 52,
+  "2025-12": 43,
+  "2026-01": 55,
+  "2026-02": 74,
+  "2026-03": 65,
+  "2026-04": 58,
+  "2026-05": 29,
+  "2026-06": 43,
+  "2026-07": 55,
+  "2026-08": 45,
+  "2026-09": 33,
+  "2026-10": 26
+ },
+ "issues_indexadas_por_mes": {
+  "2020-02": 16,
+  "2020-03": 120,
+  "2020-04": 76,
+  "2020-05": 114,
+  "2020-06": 96,
+  "2020-07": 83,
+  "2020-08": 89,
+  "2020-09": 105,
+  "2020-10": 127,
+  "2020-11": 85,
+  "2020-12": 103,
+  "2021-01": 140,
+  "2021-02": 110,
+  "2021-03": 101,
+  "2021-04": 83,
+  "2021-05": 66,
+  "2021-06": 111,
+  "2021-07": 100,
+  "2021-08": 100,
+  "2021-09": 102,
+  "2021-10": 107,
+  "2021-11": 77,
+  "2021-12": 90,
+  "2022-01": 88,
+  "2022-02": 87,
+  "2022-03": 116,
+  "2022-04": 110,
+  "2022-05": 119,
+  "2022-06": 105,
+  "2022-07": 100,
+  "2022-08": 96,
+  "2022-09": 97,
+  "2022-10": 90,
+  "2022-11": 105,
+  "2022-12": 105,
+  "2023-01": 131,
+  "2023-02": 124,
+  "2023-03": 117,
+  "2023-04": 82,
+  "2023-05": 115,
+  "2023-06": 130,
+  "2023-07": 99,
+  "2023-08": 111,
+  "2023-09": 112,
+  "2023-10": 91,
+  "2023-11": 109,
+  "2023-12": 117,
+  "2024-01": 115,
+  "2024-02": 115,
+  "2024-03": 116,
+  "2024-04": 144,
+  "2024-05": 122,
+  "2024-06": 156,
+  "2024-07": 128,
+  "2024-08": 129,
+  "2024-09": 111,
+  "2024-10": 125,
+  "2024-11": 100,
+  "2024-12": 95,
+  "2025-01": 90,
+  "2025-02": 103,
+  "2025-03": 89,
+  "2025-04": 92,
+  "2025-05": 80,
+  "2025-06": 70,
+  "2025-07": 76,
+  "2025-08": 76,
+  "2025-09": 85,
+  "2025-10": 80,
+  "2025-11": 52,
+  "2025-12": 43,
+  "2026-01": 55,
+  "2026-02": 74,
+  "2026-03": 65,
+  "2026-04": 38
+ },
+ "limpeza": {
+  "drop_adr_index_or_template": 2,
+  "drop_comment_bot": 23082,
+  "drop_comment_created_after_T": 573,
+  "drop_comment_low_value": 319,
+  "drop_doc_empty": 3,
+  "drop_doc_excluded_glob": 222,
+  "drop_issue_bot_author": 172,
+  "drop_issue_created_after_T": 468,
+  "drop_pr_bot_author": 7745,
+  "drop_pr_created_after_T": 1737,
+  "drop_pr_no_description": 2385,
+  "drop_pr_not_merged_before_T": 2921,
+  "kept_adr": 15,
+  "kept_comments": 50980,
+  "kept_doc": 424,
+  "kept_issue": 7381,
+  "kept_pr": 12112,
+  "raw_comments": 104105,
+  "raw_issue": 8021,
+  "raw_items": 34921,
+  "raw_pr": 26900,
+  "warn_issue_updated_after_T": 280,
+  "warn_pr_updated_after_T": 1528
+ },
+ "chunks": {
+  "base": {
+   "issue": 22207,
+   "pr": 13692,
+   "doc": 3243,
+   "adr": 38
+  },
+  "base_tokens": {
+   "issue": {
+    "min": 24,
+    "p10": 277.0,
+    "p50": 626.0,
+    "p90": 693.0,
+    "p99": 698.0,
+    "max": 699,
+    "mean": 551.4,
+    "total": 12245829
+   },
+   "pr": {
+    "min": 29,
+    "p10": 54.0,
+    "p50": 149.0,
+    "p90": 605.0,
+    "p99": 692.0,
+    "max": 702,
+    "mean": 233.9,
+    "total": 3203134
+   },
+   "doc": {
+    "min": 33,
+    "p10": 96.0,
+    "p50": 219.0,
+    "p90": 629.0,
+    "p99": 792.0,
+    "max": 798,
+    "mean": 288.5,
+    "total": 935521
+   },
+   "adr": {
+    "min": 89,
+    "p10": 97.4,
+    "p50": 227.5,
+    "p90": 592.3000000000002,
+    "p99": 773.1200000000001,
+    "max": 782,
+    "mean": 296.6,
+    "total": 11269
+   }
+  },
+  "enxuto": {
+   "issue": 13271,
+   "pr": 12261,
+   "doc": 3243,
+   "adr": 38
+  },
+  "logico": {
+   "issue": 21304,
+   "pr": 17866,
+   "doc": 2641,
+   "adr": 30
+  },
+  "base_extras": {
+   "issue": 22207,
+   "pr": 13692,
+   "doc": 3243,
+   "adr": 38,
+   "changelog": 36252,
+   "commit": 20741,
+   "review": 11755
+  },
+  "base_extras_total_ids": 107928
+ },
+ "testset": {
+  "candidates_after_T": 468,
+  "dups_kept": 129,
+  "dups_pre_T_pairs": 133,
+  "dups_skip_short_body": 4,
+  "eligible": 247,
+  "eligible_gold_refs_doc": 71,
+  "eligible_gold_refs_issue": 58,
+  "eligible_gold_refs_pr": 16,
+  "eligible_issues": 247,
+  "eligible_open": 86,
+  "eligible_refs_not_in_index": 108,
+  "eligible_signal_body_ref_medium": 86,
+  "eligible_signal_fix_pr_body_high": 3,
+  "eligible_signal_fix_pr_closes_high": 1,
+  "eligible_signal_fix_pr_files_high": 20,
+  "eligible_signal_fix_pr_review_low": 3,
+  "eligible_signal_thread_high": 35,
+  "eligible_stale_closed": 47,
+  "eligible_with_fix_pr": 89,
+  "eligible_with_gold": 82,
+  "eligible_with_gold_any_confidence": 83,
+  "eligible_with_gold_cross_ref": 0,
+  "eligible_with_gold_duplicate": 0,
+  "eligible_with_gold_fix_pr": 4,
+  "eligible_with_gold_fix_pr_files": 18,
+  "eligible_with_gold_query_body": 51,
+  "eligible_with_gold_thread": 26,
+  "graphql_requests": 0,
+  "kept_gold_refs_doc": 71,
+  "kept_gold_refs_issue": 58,
+  "kept_gold_refs_pr": 16,
+  "kept_issues": 247,
+  "kept_open": 86,
+  "kept_refs_not_in_index": 108,
+  "kept_signal_body_ref_medium": 86,
+  "kept_signal_fix_pr_body_high": 3,
+  "kept_signal_fix_pr_closes_high": 1,
+  "kept_signal_fix_pr_files_high": 20,
+  "kept_signal_fix_pr_review_low": 3,
+  "kept_signal_thread_high": 35,
+  "kept_stale_closed": 47,
+  "kept_with_fix_pr": 89,
+  "kept_with_gold": 82,
+  "kept_with_gold_any_confidence": 83,
+  "kept_with_gold_cross_ref": 0,
+  "kept_with_gold_duplicate": 0,
+  "kept_with_gold_fix_pr": 4,
+  "kept_with_gold_fix_pr_files": 18,
+  "kept_with_gold_query_body": 51,
+  "kept_with_gold_thread": 26,
+  "pr_files_requests": 0,
+  "skip_bot": 217,
+  "skip_fix_pr_mass_doc_edit": 1,
+  "skip_short_body": 4
+ },
+ "gabarito": {
+  "issues_com_gabarito": 82,
+  "refs_total": 142,
+  "refs_unicas": 122,
+  "por_tipo_unicas": {
+   "doc": 52,
+   "pr": 16,
+   "issue": 54
+  },
+  "docs_por_issue_media": 1.73,
+  "queries_com_ref_mascarada": 61,
+  "refs_mascaradas_total": 150
+ },
+ "testset_v2": {
+  "total": 216,
+  "grupos": {
+   "novo_so_labels": 134,
+   "original_82": 82
+  },
+  "abertas": 75
+ }
+}

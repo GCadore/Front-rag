@@ -27,7 +27,7 @@ export const DEFAULT_CONFIG: RagConfig = {
   rag: true,
   index: "base",
   search: "hybrid",
-  reranker: true,
+  reranker: false, // desligado por padrão: piorou nDCG/MRR na bateria de testes
   guardrails: true,
 };
 

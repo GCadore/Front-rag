@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 log = logging.getLogger("rag.retrieval")
 
 CANDIDATES = 50          # top N de cada busca (e do reranker)
+CANDIDATES_SPLIT = 150   # com RETRIEVAL_SPLIT_TYPES: mais candidatos, para sobrar doc/ADR suficiente
 MAX_PER_DOC = 3          # diversidade: no máximo 3 chunks por doc_id
 REASONABLE_RANK = 20     # para scores sem escala absoluta (bm25/rrf/rerank)
 SNIPPET_CHARS = 300
@@ -42,7 +43,9 @@ class Hit:
     @property
     def number(self) -> int | None:
         value = self.metadata.get("number")
-        return int(value) if isinstance(value, int) or str(value).isdigit() else None
+        number = int(value) if isinstance(value, int) or str(value).isdigit() else None
+        # docs/ADRs vêm com number=-1 (ou vazio): sem número, a citação usa o doc_id
+        return number if number is not None and number > 0 else None
 
     @property
     def source_label(self) -> str:
@@ -100,13 +103,124 @@ def make_snippet(text: str, limit: int = SNIPPET_CHARS) -> str:
 # --------------------------------------------------------------------------- #
 # Funções puras (testáveis sem modelos)
 # --------------------------------------------------------------------------- #
-def rrf_fuse(rankings: list[list[tuple[str, float]]], k: int = 60) -> list[tuple[str, float]]:
-    """Reciprocal Rank Fusion: score = Σ 1/(k + rank), rank começando em 1."""
+def rrf_fuse(
+    rankings: list[list[tuple[str, float]]], k: int = 60, weights: list[float] | None = None
+) -> list[tuple[str, float]]:
+    """Reciprocal Rank Fusion ponderado: score = Σ w_i/(k + rank_i), rank começando em 1.
+
+    Sem `weights`, todos os pesos valem 1 (RRF clássico)."""
     scores: dict[str, float] = defaultdict(float)
-    for ranking in rankings:
+    for i, ranking in enumerate(rankings):
+        w = 1.0 if weights is None else float(weights[i])
+        if w == 0:
+            continue
         for rank, (doc_id, _) in enumerate(ranking, start=1):
-            scores[doc_id] += 1.0 / (k + rank)
+            scores[doc_id] += w / (k + rank)
     return sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+
+
+def _fuse_same_kind(lists: list[list[tuple[str, float]]], weights: list[float], k: int) -> list[tuple[str, float]]:
+    """Junta listas do mesmo tipo (várias consultas) numa só, para os modos só-denso/só-BM25.
+    Com uma lista só, devolve ela mesma (scores originais)."""
+    if not lists:
+        return []
+    if len(lists) == 1:
+        return lists[0]
+    return rrf_fuse(lists, k, weights=weights)
+
+
+def default_split_types(settings, index_name: str | None) -> bool:
+    """Split issues/docs por padrão: RETRIEVAL_SPLIT_TYPES liga em todos os índices;
+    RETRIEVAL_SPLIT_TYPES_INDICES (padrão "logico") liga só nos índices listados.
+    config.split_types da requisição sempre tem prioridade (ver _pick)."""
+    if getattr(settings, "split_types", False):
+        return True
+    names = getattr(settings, "split_types_indices", ()) or ()
+    return (index_name or "").strip().lower() in {n.strip().lower() for n in names}
+
+
+def _pick(request_value: Any, default: Any) -> Any:
+    """Valor da requisição (config) quando informado; senão o padrão do servidor."""
+    return default if request_value is None else request_value
+
+
+def split_by_type(
+    candidates: list[Hit],
+    top_k: int,
+    k_issues: int,
+    k_docs: int,
+    is_reasonable: Callable[[int, Hit], bool],
+    max_per_doc: int = MAX_PER_DOC,
+) -> list[Hit]:
+    """Top-k separado por tipo: até k_issues de issues/PRs e k_docs de docs/ADRs (proporcional
+    quando top_k != k_issues + k_docs). Se um lado não tiver candidatos suficientes, o outro
+    completa. A ordem final segue o ranking original."""
+    total = max(1, k_issues + k_docs)
+    ki = min(top_k, round(top_k * k_issues / total))
+    kd = top_k - ki
+    issues = [h for h in candidates if type_group(h) != "doc_adr"]
+    docs = [h for h in candidates if type_group(h) == "doc_adr"]
+    sel_i = diversify(issues, ki, is_reasonable, max_per_doc=max_per_doc)
+    sel_d = diversify(docs, kd, is_reasonable, max_per_doc=max_per_doc)
+    if len(sel_i) < ki:
+        sel_d = diversify(docs, top_k - len(sel_i), is_reasonable, max_per_doc=max_per_doc)
+    elif len(sel_d) < kd:
+        sel_i = diversify(issues, top_k - len(sel_d), is_reasonable, max_per_doc=max_per_doc)
+    rank = {id(h): r for r, h in enumerate(candidates)}
+    return sorted(sel_i + sel_d, key=lambda h: rank[id(h)])
+
+
+def group_by_doc(hits: list[Hit]) -> list[Hit]:
+    """Fica só com o melhor chunk de cada doc_id (a lista já vem ordenada), antes do top_k.
+
+    Assim o top_k conta documentos (issues/PRs/docs/ADRs) e não chunks repetidos do mesmo doc."""
+    seen: set[str] = set()
+    out: list[Hit] = []
+    for hit in hits:
+        if hit.doc_id in seen:
+            continue
+        seen.add(hit.doc_id)
+        out.append(hit)
+    return out
+
+
+def attach_doc_chunks(
+    docs: list[Hit], candidates: list[Hit], chunks_per_doc: int, max_tokens: int | None = None
+) -> list[Hit]:
+    """Opção (d): os docs já foram escolhidos (1 chunk por doc); agora anexa até `chunks_per_doc`
+    chunks de cada doc, pegando os mais bem ranqueados entre os candidatos.
+
+    Os extras entram em rodadas (2º chunk de cada doc, na ordem dos docs; depois o 3º...) e só
+    enquanto couberem em `max_tokens`, para que nenhum doc escolhido saia do contexto por causa do
+    teto. Os extras herdam o score do doc, então o trecho final mantém a ordem dos docs."""
+    if chunks_per_doc <= 1 or not docs:
+        return list(docs)
+    chosen = {h.doc_id: h for h in docs}
+    extras: dict[str, list[Hit]] = defaultdict(list)
+    head_ids = {h.id for h in docs}
+    for hit in candidates:
+        if hit.doc_id in chosen and hit.id not in head_ids and len(extras[hit.doc_id]) < chunks_per_doc - 1:
+            extras[hit.doc_id].append(replace(hit, score=chosen[hit.doc_id].score))
+    budget = None if max_tokens is None else max_tokens - sum(approx_tokens(h.text) for h in docs)
+    out = list(docs)
+    for rnd in range(chunks_per_doc - 1):
+        for head in docs:
+            more = extras.get(head.doc_id, [])
+            if rnd >= len(more):
+                continue
+            cost = approx_tokens(more[rnd].text)
+            if budget is not None:
+                if cost > budget:
+                    continue
+                budget -= cost
+            out.append(more[rnd])
+    return out
+
+
+def order_by_doc(passages: list[Hit], docs: list[Hit]) -> list[Hit]:
+    """Reordena os trechos pela ordem em que os docs foram escolhidos (estável)."""
+    rank = {h.doc_id: i for i, h in enumerate(docs)}
+    return sorted(passages, key=lambda h: rank.get(h.doc_id, len(rank)))
 
 
 def type_group(hit: Hit) -> str | None:
@@ -248,6 +362,10 @@ class Retriever:
         with self._model_lock:
             return self.embedder.encode([query])[0]
 
+    def _embed_many(self, queries: list[str]) -> list[Any]:
+        with self._model_lock:
+            return list(self.embedder.encode(queries))
+
     def _rerank(self, query: str, hits: list[Hit]) -> list[Hit]:
         assert self.reranker is not None
         with self._model_lock:
@@ -261,7 +379,19 @@ class Retriever:
             return lambda rank, h: (h.dense_score if h.dense_score is not None else h.score) >= threshold
         return lambda rank, h: rank < REASONABLE_RANK
 
-    def retrieve(self, query: str, config: "RagConfig", top_k: int) -> RetrievalResult:
+    def retrieve(
+        self,
+        query: str,
+        config: "RagConfig",
+        top_k: int,
+        alt_query: str | None = None,
+        alt_mode: str = "fuse",
+        alt_weight: float = 1.0,
+        alt_lists: str = "both",
+    ) -> RetrievalResult:
+        """`alt_query` = consulta reescrita pelo LLM (QUERY_REWRITE). alt_mode "fuse": as listas da
+        original e da reescrita entram juntas no RRF, a reescrita com peso `alt_weight` e só nas buscas
+        de `alt_lists` ("dense", "bm25" ou "both"); "replace": só a reescrita é usada."""
         index = self.indices.get(config.index)
         if index is None:
             raise RetrievalError(f"Índice '{config.index}' não está disponível. Disponíveis: {self.available_indices}")
@@ -269,19 +399,45 @@ class Retriever:
             raise RetrievalError(f"O índice '{config.index}' não tem BM25 carregado.")
 
         t0 = time.perf_counter()
-        dense: list[tuple[str, float]] = []
-        sparse: list[tuple[str, float]] = []
+        st = self.settings
+        split = _pick(getattr(config, "split_types", None), default_split_types(st, config.index))
+        use_boost = _pick(getattr(config, "bm25_boost", None), getattr(st, "bm25_boost", False))
+        bm25 = getattr(index, "bm25_boost", None) if use_boost else None
+        bm25 = bm25 or index.bm25  # BM25_TITLE_BOOST/BM25_LABEL_BOOST: índice com título/labels reforçados
+        n_search = CANDIDATES_SPLIT if split else CANDIDATES
+        alt = (alt_query or "").strip()
+        dense_q: list[tuple[str, float]] = [(query, 1.0)]
+        sparse_q: list[tuple[str, float]] = [(query, 1.0)]
+        if alt and alt_mode == "replace":
+            dense_q = sparse_q = [(alt, 1.0)]
+        elif alt and alt != query.strip():
+            if alt_lists in ("dense", "both"):
+                dense_q = dense_q + [(alt, float(alt_weight))]
+            if alt_lists in ("bm25", "both"):
+                sparse_q = sparse_q + [(alt, float(alt_weight))]
+        dense_lists: list[list[tuple[str, float]]] = []
+        sparse_lists: list[list[tuple[str, float]]] = []
         if config.search in ("dense", "hybrid"):
-            dense = index.dense.search(self._embed(query), CANDIDATES)
+            vecs = self._embed_many([q for q, _ in dense_q])
+            dense_lists = [index.dense.search(v, n_search) for v in vecs]
         if config.search in ("bm25", "hybrid"):
-            sparse = [(i, s) for i, s in index.bm25.search(query, CANDIDATES) if s > 0]  # type: ignore[union-attr]
+            sparse_lists = [
+                [(i, s) for i, s in bm25.search(q, n_search) if s > 0]  # type: ignore[union-attr]
+                for q, _ in sparse_q
+            ]
+        dense = _fuse_same_kind(dense_lists, [w for _, w in dense_q], self.settings.rrf_k)
+        sparse = _fuse_same_kind(sparse_lists, [w for _, w in sparse_q], self.settings.rrf_k)
 
-        dense_scores = dict(dense)
+        dense_scores: dict[str, float] = {}
+        for lst in dense_lists:  # melhor cosseno de cada chunk entre as consultas (gate e dense_score)
+            for cid, sc in lst:
+                if sc > dense_scores.get(cid, float("-inf")):
+                    dense_scores[cid] = sc
         top_scores: dict[str, float] = {}
-        if dense:
-            top_scores["dense"] = round(max(s for _, s in dense), 4)
-        if sparse:
-            top_scores["bm25"] = round(max(s for _, s in sparse), 4)
+        if dense_scores:
+            top_scores["dense"] = round(max(dense_scores.values()), 4)
+        if any(sparse_lists):
+            top_scores["bm25"] = round(max(s for lst in sparse_lists for _, s in lst), 4)
 
         # Ordem: busca (dense/bm25 ou híbrida com RRF) -> reranker -> diversidade por fonte -> top_k
         if config.search == "dense":
@@ -289,7 +445,12 @@ class Retriever:
         elif config.search == "bm25":
             ranking, scorer = sparse, "bm25"
         else:
-            ranking, scorer = rrf_fuse([dense, sparse], self.settings.rrf_k), "dense"
+            w_bm25 = float(getattr(self.settings, "rrf_w_bm25", 0.8))
+            # Uma lista por (consulta, tipo) no mesmo RRF: com 1 consulta é o RRF ponderado de antes
+            lists = dense_lists + sparse_lists
+            wts = [(1.0 - w_bm25) * w for _, w in dense_q][: len(dense_lists)] + [w_bm25 * w for _, w in sparse_q][: len(sparse_lists)]
+            ranking = rrf_fuse(lists, self.settings.rrf_k, weights=wts)
+            scorer = "dense"
             if ranking:
                 top_scores["rrf"] = round(ranking[0][1], 6)
 
@@ -302,7 +463,7 @@ class Retriever:
                 score=float(score),
                 dense_score=dense_scores.get(cid),
             )
-            for cid, score in ranking[:CANDIDATES]
+            for cid, score in ranking[:n_search]
             if index.has_chunk(cid)
         ]
         # Gate: no híbrido usamos o melhor score denso (o RRF não tem escala absoluta)
@@ -319,8 +480,24 @@ class Retriever:
             top_scores["rerank"] = round(relevance, 4)
             timings["rerank"] = int((time.perf_counter() - t1) * 1000)
 
-        selected = diversify(candidates, top_k, self._is_reasonable(scorer))
-        passages = cap_context(merge_neighbors(selected), self.settings.max_context_tokens)
+        if split:
+            # RETRIEVAL_SPLIT_TYPES: top-k separado de issues/PRs e de docs/ADRs (ex.: 5 + 5)
+            selected = split_by_type(
+                candidates, top_k, int(getattr(st, "split_k_issues", 5)), int(getattr(st, "split_k_docs", 5)),
+                self._is_reasonable(scorer), max_per_doc=1 if getattr(st, "group_by_doc", False) else MAX_PER_DOC,
+            )
+            merged = merge_neighbors(selected)
+        elif getattr(self.settings, "group_by_doc", True):
+            # RETRIEVAL_GROUP_BY_DOC: 1 chunk (o melhor) por documento antes do top_k
+            docs = diversify(group_by_doc(candidates), top_k, self._is_reasonable(scorer), max_per_doc=1)
+            # RETRIEVAL_CHUNKS_PER_DOC: depois de escolher os docs, anexa até N chunks de cada um
+            per_doc = int(getattr(self.settings, "chunks_per_doc", 1) or 1)
+            selected = attach_doc_chunks(docs, candidates, per_doc, self.settings.max_context_tokens)
+            merged = order_by_doc(merge_neighbors(selected), docs)
+        else:
+            selected = diversify(candidates, top_k, self._is_reasonable(scorer))
+            merged = merge_neighbors(selected)
+        passages = cap_context(merged, self.settings.max_context_tokens)
         return RetrievalResult(
             hits=passages,
             scorer=scorer,

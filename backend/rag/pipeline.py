@@ -16,6 +16,10 @@ from .retrieval import RetrievalError, RetrievalResult
 from .schemas import CompareRequest, Message, RagConfig
 from .settings import Settings
 from .text import clean_issue_body
+from .label_votes import majority, vote
+from .query_rewrite import rewrite_query
+from .related_cut import cut_related
+from .triage_aids import neighbor_labels, parse_cutoff
 
 DEFAULT_TOP_K = {"chat": 8, "triage": 10}
 
@@ -27,7 +31,7 @@ class RetrieverLike(Protocol):
     @property
     def has_reranker(self) -> bool: ...
 
-    def retrieve(self, query: str, config: RagConfig, top_k: int) -> RetrievalResult: ...
+    def retrieve(self, query: str, config: RagConfig, top_k: int, **alt: Any) -> RetrievalResult: ...
 
 
 @dataclass
@@ -68,19 +72,39 @@ def _ms(start: float) -> int:
 
 def effective_config(services: Services, cfg: RagConfig, mode: str) -> RagConfig:
     reranker_ok = bool(services.settings.enable_reranker and services.retriever and services.retriever.has_reranker)
-    return cfg.model_copy(
-        update={
-            "top_k": cfg.top_k or DEFAULT_TOP_K[mode],
-            "reranker": bool(cfg.rag and cfg.reranker and reranker_ok),
-        }
-    )
+    settings = services.settings
+    update: dict[str, Any] = {
+        "top_k": cfg.top_k or DEFAULT_TOP_K[mode],
+        "reranker": bool(cfg.rag and cfg.reranker and reranker_ok),
+    }
+    if mode == "triage":
+        nb = cfg.neighbor_labels if cfg.neighbor_labels is not None else getattr(settings, "triage_neighbor_labels", True)
+        ld = cfg.label_descriptions if cfg.label_descriptions is not None else getattr(settings, "triage_label_descriptions", True)
+        update["neighbor_labels"] = bool(nb and cfg.rag)  # sem RAG não há vizinhos
+        update["label_descriptions"] = bool(ld)
+        qr = cfg.query_rewrite if cfg.query_rewrite is not None else getattr(settings, "query_rewrite", False)
+        lv = cfg.label_votes if cfg.label_votes is not None else getattr(settings, "triage_label_votes", 1)
+        update["query_rewrite"] = bool(qr and cfg.rag)  # sem RAG não há busca para reescrever
+        update["label_votes"] = max(1, int(lv or 1))
+        rm = cfg.related_min_score if cfg.related_min_score is not None else getattr(settings, "related_min_score", None)
+        update["related_min_score"] = rm
+    return cfg.model_copy(update=update)
 
 
-async def run_retrieval(services: Services, query: str, cfg: RagConfig) -> RetrievalResult:
+async def run_retrieval(services: Services, query: str, cfg: RagConfig, alt_query: str | None = None) -> RetrievalResult:
     if services.retriever is None:
         raise ApiError(503, "Os índices do RAG não estão carregados nesta instância.")
     try:
-        return await asyncio.to_thread(services.retriever.retrieve, query, cfg, cfg.top_k or 8)
+        if not alt_query:
+            return await asyncio.to_thread(services.retriever.retrieve, query, cfg, cfg.top_k or 8)
+        st = services.settings
+        return await asyncio.to_thread(
+            services.retriever.retrieve, query, cfg, cfg.top_k or 8,
+            alt_query=alt_query,
+            alt_mode=getattr(st, "query_rewrite_mode", "fuse"),
+            alt_weight=float(getattr(st, "query_rewrite_weight", 0.5)),
+            alt_lists=getattr(st, "query_rewrite_lists", "dense"),
+        )
     except RetrievalError as exc:
         raise ApiError(400, str(exc)) from exc
 
@@ -280,6 +304,31 @@ async def _triage_llm(services: Services, msgs: list[dict[str, str]]) -> tuple[A
         return None, f"JSON inválido do modelo após 2 tentativas: {second_error}"
 
 
+async def _triage_llm_votes(
+    services: Services, msgs: list[dict[str, str]], n: int
+) -> tuple[Any, str | None, dict[str, int] | None]:
+    """TRIAGE_LABEL_VOTES: N amostras (temperatura TRIAGE_VOTE_TEMPERATURE), labels da maioria.
+    Usa `complete_n` (uma requisição com n=N) quando o cliente tem; senão N chamadas em paralelo.
+    Se nenhuma amostra validar, cai no fluxo normal (1 chamada + correção)."""
+    temp = float(getattr(services.settings, "triage_vote_temperature", 0.7))
+    complete_n = getattr(services.llm, "complete_n", None)
+    if complete_n is not None:
+        raws = await complete_n(msgs, n, temperature=temp, json_mode=True)
+    else:
+        raws = await asyncio.gather(*(services.llm.complete(msgs, temperature=temp, json_mode=True) for _ in range(n)))
+    parsed = []
+    for raw in raws:
+        try:
+            parsed.append(gr.parse_triage_json(raw))
+        except ValueError:
+            continue
+    if not parsed:
+        output, error = await _triage_llm(services, msgs)
+        return output, error, None
+    merged, votes = vote(parsed, min_votes=majority(len(parsed)))
+    return merged, None, votes
+
+
 def _empty_triage(cfg: RagConfig, timings: dict[str, int], **overrides: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
         "labels": [], "component": None, "related": [], "docs": [], "needs_more_info": False,
@@ -301,19 +350,42 @@ async def triage_once(services: Services, title: str, body: str, cfg: RagConfig,
     result: RetrievalResult | None = None
     hits = None
     timings: dict[str, int] = {}
+    search_query: str | None = None
     if cfg.rag:
-        result = await run_retrieval(services, query, cfg)
+        rewrite_ms = None
+        if cfg.query_rewrite:
+            t_rw = time.perf_counter()
+            search_query = await rewrite_query(services.llm, title, body_for_llm)
+            rewrite_ms = _ms(t_rw)
+        result = await run_retrieval(services, query, cfg, alt_query=search_query)
         timings = {"retrieval": result.timings_ms.get("retrieval", 0), "rerank": result.timings_ms.get("rerank", 0)}
+        if rewrite_ms is not None:
+            timings["rewrite"] = rewrite_ms
         if cfg.guardrails and not gr.passes_min_score(result, services.settings.min_score):
             timings["total"] = _ms(started)
             _log(services, endpoint, cfg, query, retrieval=result, timings_ms=timings, refused=True, input_truncated=truncated)
             return _empty_triage(cfg, timings, refused=True, explanation=gr.REFUSAL_TEXT)
         hits = result.hits
 
-    msgs = triage_messages(services.prompts, title, body_for_llm, hits, services.labels, strict=cfg.guardrails)
+    neighbors = None
+    if cfg.neighbor_labels and hits:
+        settings = services.settings
+        neighbors = neighbor_labels(
+            hits, title,
+            cutoff_ts=parse_cutoff(getattr(settings, "triage_neighbor_cutoff", None)),
+            k=int(getattr(settings, "triage_neighbor_k", 5)),
+        )
+    msgs = triage_messages(
+        services.prompts, title, body_for_llm, hits, services.labels, strict=cfg.guardrails,
+        neighbors=neighbors, label_descriptions=bool(cfg.label_descriptions),
+    )
     t_llm = time.perf_counter()
+    votes: dict[str, int] | None = None
     try:
-        output, error = await _triage_llm(services, msgs)
+        if (cfg.label_votes or 1) > 1:
+            output, error, votes = await _triage_llm_votes(services, msgs, int(cfg.label_votes or 1))
+        else:
+            output, error = await _triage_llm(services, msgs)
     except LLMError as exc:
         _log(services, endpoint, cfg, query, retrieval=result, error=str(exc))
         raise
@@ -329,10 +401,16 @@ async def triage_once(services: Services, title: str, body: str, cfg: RagConfig,
     # Desligados: nada é validado, pra comparação mostrar o modelo "cru".
     mentions = gr.MentionGuard(hits, [title, body]) if (cfg.guardrails and hits is not None) else None
     guarded = gr.guard_triage(output, hits or [], services.allowed_labels, enabled=cfg.guardrails, mention_guard=mentions)
+    if cfg.related_min_score is not None and hits:
+        # RELATED_MIN_SCORE: tira related vindos de trechos com score de busca baixo
+        kind = getattr(services.settings, "related_score_kind", "dense")
+        guarded.related, cut = cut_related(guarded.related, hits, cfg.related_min_score, kind)
+        guarded.removed["related_score"] = cut
     timings["total"] = _ms(started)
     _log(
         services, endpoint, cfg, query,
         retrieval=result, timings_ms=timings, refused=False, removed=guarded.removed, input_truncated=truncated,
+        neighbor_labels=neighbors, search_query=search_query, label_votes=votes,
     )
     return _empty_triage(
         cfg, timings,
@@ -344,6 +422,9 @@ async def triage_once(services: Services, title: str, body: str, cfg: RagConfig,
         explanation=guarded.explanation,
         sources=sources,
         removed=guarded.removed,
+        neighbor_labels=neighbors,
+        search_query=search_query,
+        label_votes=votes,
     )
 
 

@@ -108,6 +108,7 @@ class Index:
     store: dict[str, Chunk]
     dense: Any                 # NumpyDense | ChromaDense
     bm25: BM25Searcher | None
+    bm25_boost: BM25Searcher | None = None  # BM25 com título/labels reforçados (BM25_TITLE_BOOST/BM25_LABEL_BOOST)
 
     def has_chunk(self, cid: str) -> bool:
         return cid in self.store
@@ -175,6 +176,37 @@ def build_bm25(texts: list[str], ids: list[str], tokenizer: BM25Tokenizer, setti
     model = bm25s.BM25(**_bm25_params(settings))
     model.index(tokenizer.corpus(texts), show_progress=False)
     return BM25Searcher(model, ids, tokenizer)
+
+
+BOOST_TYPES = {"issue", "pr"}
+
+
+def boosted_text(chunk: Chunk, title_boost: int, label_boost: int) -> str:
+    """Texto do chunk para o BM25 reforçado: em issues/PRs, o título entra mais `title_boost` vezes
+    e as labels (área, tipo, integração; "area:catalog" -> "area catalog") mais `label_boost` vezes.
+    O cabeçalho do chunk já tem título e labels uma vez; docs/ADRs ficam iguais."""
+    meta = chunk.metadata or {}
+    if str(meta.get("type", "")) not in BOOST_TYPES:
+        return chunk.text
+    extra: list[str] = []
+    title = str(meta.get("title") or "").strip()
+    if title and title_boost > 0:
+        extra += [title] * title_boost
+    labels = [lb.strip() for lb in str(meta.get("labels") or "").split("|") if lb.strip()]
+    labels = [lb.replace(":", " ") for lb in labels if lb.startswith(("area:", "type:", "integration:"))]
+    if labels and label_boost > 0:
+        extra += [" ".join(labels)] * label_boost
+    return chunk.text if not extra else chunk.text + "\n" + "\n".join(extra)
+
+
+def build_boosted_bm25(
+    index: "Index", tokenizer: BM25Tokenizer, settings: Settings, title_boost: int, label_boost: int
+) -> BM25Searcher | None:
+    """Segundo BM25, em memória, com o mesmo corpus do BM25 normal do índice."""
+    if index.bm25 is None or (title_boost <= 0 and label_boost <= 0):
+        return None
+    ids = [i for i in index.bm25.ids if i in index.store]
+    return build_bm25([boosted_text(index.store[i], title_boost, label_boost) for i in ids], ids, tokenizer, settings)
 
 
 def load_or_build_bm25(
@@ -266,8 +298,18 @@ def load_indices(settings: Settings, tokenizer: BM25Tokenizer) -> dict[str, Inde
             log.exception("Falha ao carregar o índice %s", name)
             continue
         if index is not None:
+            tb = int(getattr(settings, "bm25_title_boost", 0) or 0)
+            lb = int(getattr(settings, "bm25_label_boost", 0) or 0)
+            if tb > 0 or lb > 0:
+                try:
+                    index.bm25_boost = build_boosted_bm25(index, tokenizer, settings, tb, lb)
+                except Exception:  # noqa: BLE001 - sem o reforço, segue o BM25 normal
+                    log.exception("Falha ao montar o BM25 reforçado de %s", name)
             indices[name] = index
-            log.info("Índice %s carregado (%d chunks, bm25=%s)", name, len(index.store), index.bm25 is not None)
+            log.info(
+                "Índice %s carregado (%d chunks, bm25=%s, bm25_reforcado=%s)",
+                name, len(index.store), index.bm25 is not None, index.bm25_boost is not None,
+            )
     return indices
 
 
