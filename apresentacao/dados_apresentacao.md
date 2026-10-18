@@ -53,7 +53,7 @@ Todos os números são reais e vêm de `estatisticas_base.json`, `exemplos_demo.
   - #34395 (GitLab 406): 3 labels certos, incluindo integration:gitlab, e a mesma causa raiz encontrada em #28190.
 - Erros:
   - #34022: área errada (openapi-tooling no lugar de catalog), mas a busca acertou.
-  - #34747: o modelo citou issues fora do contexto e os guardrails removeram.
+  - #34747: o modelo citou pelo número da issue em vez do `[n]` do trecho, e os guardrails apagaram 3 referências que estavam no contexto.
 - Também mostrar o prompt, a resposta em JSON e a comparação entre versões (tabela abaixo).
 
 **6. Resultados** (`resultados_fig1_f1_labels.png`, `resultados_fig2_busca.png`)
@@ -72,7 +72,7 @@ Evolução no índice base. As linhas até a votação usam 82 issues; as duas �
 | + busca separada 6+4 | 0,78 | 0,70 | 0,48 | 0,50 | só no lógico |
 
 Outros resultados:
-- **Guardrails** (30 issues): referências fora das fontes caíram de 22 para 0; F1 subiu de 0,72 para 0,78; 95% de recusa em perguntas fora do tema.
+- **Guardrails** (30 issues): F1 subiu de 0,72 para 0,78; 95% de recusa em perguntas fora do tema. (O "22 → 0 refs fora das fontes" é artefato da medição, não alucinação.) Na busca2, 14 labels inventados foram barrados.
 - **Busca separada no lógico:** nDCG +0,022 (IC95 [0,004; 0,045]) e related_hit +6,1 pp, de 59,8% para 65,9%.
 - **Hipóteses, comparando configurações na 1ª bateria:**
   - Semântica vs léxica: nDCG da densa 0,39, BM25 0,43, híbrida 0,44. Porém a densa teve o melhor F1 de integration: (0,56).

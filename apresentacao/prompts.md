@@ -26,7 +26,7 @@ LABELS PERMITIDAS:
 - type:bug: Algo não funciona como deveria (erro, crash, regressão, comportamento errado).
 - area:catalog: Software Catalog: entidades, catalog-info.yaml, processors, entity providers, ingestão, relações.
 - integration:gitlab: Envolve GitLab (gitlab.com ou self-hosted: OAuth, provider, publish:gitlab).
-- …  (76 labels; descrições próprias quando a do GitHub é vazia/vaga — melhoria "B")
+- …  (42 labels de triagem, filtradas das 76 do labels.json: type/area/integration/domain + needs:repro/needs:more-info; descrições próprias quando a do GitHub é vazia/vaga — melhoria "B")
 
 EXEMPLOS RESOLVIDOS (issues antigas, com os labels que os mantenedores aplicaram):
 Exemplo 1 - "[plugin-scaffolder-backend-module-github] customProperties should support a list of strings"
@@ -63,5 +63,5 @@ Responda novamente APENAS com o objeto JSON no formato pedido.
 
 ## Pós-processamento (guardrails, no código e não no prompt)
 - Labels fora da lista permitida são removidos.
-- `related`, `docs` e citações `[n]` que não estão no CONTEXTO são removidos; nos dados, aparecem no campo `removed`.
+- `related`, `docs` e citações `[n]` com número fora de 1..k são removidos; nos dados, aparecem no campo `removed`. Atenção: na busca2, quase tudo o que foi removido era o número da issue escrito no lugar do `[n]`, com a issue presente no contexto (ver explicacao_prompts.md, 6.2).
 - Quando o assunto não é Backstage, o sistema recusa a resposta (recusa fora de tema 95%).

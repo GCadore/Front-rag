@@ -32,7 +32,7 @@ Salvo indicação, IC95 = bootstrap pareado.
 | **Split 6 issues/PRs + 4 docs no lógico** | Docs e ADRs perdiam espaço para issues no top-10. | **[medido]** Offline (v4, 82 issues): nDCG 0,471 → 0,490, **Δ +0,019 [+0,001; +0,038]**; Recall@10 0,569 → 0,615. Ponta a ponta, pelo front (busca2): Δ nDCG das fontes +0,022 [+0,004; +0,045]; related_hit 59,8% → 65,9% (+6,1 pp [−1,2; +14,6]); F1 de labels igual (+0,002). No **base** não vale: Δ nDCG +0,016 [−0,006; +0,038] e F1 `integration:` −0,054. **Ganho pequeno e consistente, mas sempre medido no mesmo conjunto de 82 issues.** |
 | **A = labels dos vizinhos + B = descrições dos labels** | O modelo errava labels raros (`integration:*`) por não saber o que significam. | **[medido]** Base, 82 issues: F1 micro 0,740 → **0,780** (Δ +0,041 [−0,003; +0,085]); F1 `integration:` **0,444 → 0,720** (Δ +0,276 [+0,012; +0,567]). No lógico, B sozinho já leva `integration:` de 0,375 a 0,696, e o F1 micro fica igual (+0,007). ⚠️ O F1 de `integration:` se apoia em só **13 labels** nas 82 issues. |
 | **Qwen3.5-9B, fp8, vLLM no Modal** | **[projeto]** Modelo aberto (sem API paga, dados não saem do nosso ambiente). Com fp8 os pesos ficam em ~10 GB e cabem numa A10G de 24 GB com 32k de contexto; em bf16 deu OOM (`llm_qwen.py`). O vLLM expõe API compatível com a da OpenAI com saída JSON. Scale-to-zero (`min_containers = 0`): custo zero parado. | **[medido]** Mediana de 22,5 s por triagem (864 respostas, p90 29,9 s). O Modal (billing medido) foi de US$ 5,01 a US$ 20,64 em todas as baterias (17–18/10), ≈ US$ 15,6 de créditos. |
-| **Guardrails no código, não no prompt** | **[projeto]** Pedir no prompt "não invente" não garante nada; o código checa depois: valida o schema JSON (com nova tentativa), remove labels fora da lista, citações e related/docs que não estão nas fontes entregues, menções `#n`/URLs desconhecidas, e recusa quando o score é baixo. | **[medido]** 30 issues reais: refs fora das fontes 22 → **0**; F1 0,72 → 0,78. Chat fora do tema: 95% de recusa com guardrails × 0% sem. |
+| **Guardrails no código, não no prompt** | **[projeto]** Pedir no prompt "não invente" não garante nada; o código checa depois: valida o schema JSON (com nova tentativa), remove labels fora da lista, citações e related/docs que não estão nas fontes entregues, menções `#n`/URLs desconhecidas, e recusa quando o score é baixo. | **[medido]** 30 issues reais: F1 0,72 → **0,78** (prompt com regras + filtro × prompt simples); `needs_more_info` 24 → 11 de 30. Chat fora do tema: 95% de recusa com guardrails × 0% sem. Na busca2, o filtro removeu 14 labels inventados (fora da lista). ⚠️ O "22 → 0 refs fora das fontes" é artefato da medição (sem guardrail o related sai sem `doc_id`), não alucinação medida. |
 | **Reescrita da consulta e votação de labels: testadas e desligadas** | Ideias comuns para melhorar a busca e a estabilidade dos labels. | **[medido]** Reescrita (base): F1 igual (Δ 0,000 [−0,019; +0,019]), related_hit +4,9 pp [0,0; +11,0], nDCG +0,001, **+2,3 s** de latência; no lógico, F1 −0,008. Votação com 3 amostras: F1 −0,009, `integration:` −0,133 [−0,372; +0,044], **+3,1 s**. Custo sem ganho → desligadas (podem ser ligadas por requisição). |
 | **Corte temporal T = 22/04/2026** | Evitar vazamento: a issue de teste, os comentários dela e o PR que a corrigiu não podem estar no índice. | **[medido]** 0 chunks com data ≥ T. As labels dos vizinhos também respeitam T (`TRIAGE_NEIGHBOR_CUTOFF`). Refs do corpo da issue de teste mascaradas como `[ref]` (139 refs em 58 das 82). |
 
@@ -69,10 +69,10 @@ As duas configurações padrão são **base (b)** e **lógico + split**. O "gaba
 - **Produzido** (nas duas configs): `type:bug` + **`area:openapi-tooling`**; related #28725 "Swagger deep linking broken after upgrading to 1.35".
 - **Por quê: erro do LLM, com gabarito ambíguo.** O Swagger fica no plugin de API docs, então `openapi-tooling` é plausível. Mas os mantenedores usaram `area:catalog`, e o autor marcou "Project Area: Catalog" no formulário. O modelo não aproveitou esse campo. A busca acertou: trouxe a issue antiga com o mesmo bug.
 
-### ❌ Erro 2: #34747 "Scaffolder ListTasksPage search only works per page" (citação inventada + área faltando)
+### ❌ Erro 2: #34747 "Scaffolder ListTasksPage search only works per page" (numeração errada nas citações + área faltando)
 - **Esperado:** `type:bug`, `area:scaffolder`, **`area:search`**.
-- **Produzido** (base (b)): `type:bug`, `area:scaffolder`. O modelo citou #30542, #32353 e #32271, que **não estavam nos trechos entregues**. O guardrail removeu as 3 citações e os 3 related, e related ficou vazio.
-- **Por quê: alucinação do LLM, barrada pelo código.** O defeito é a explicação: "Isso é confirmado como um bug conhecido em, onde a busca não aparece… também é relatado em e, que discutem…". A frase fica com buracos. No lógico + split, as mesmas 3 issues **vieram na busca** e foram aceitas como related legítimas. Ou seja, o modelo "lembrava" delas, mas a busca do base não as trouxe. Faltou também `area:search`, um caso de várias áreas (20 das 216 issues têm mais de uma `area:`).
+- **Produzido** (base (b)): `type:bug`, `area:scaffolder`. O modelo escreveu `[30542]`, `[32353]`, `[32271]` (o **número da issue**) onde devia escrever o número do trecho. As 3 issues **estavam** nos trechos entregues (posições 1, 4 e 5). O guardrail, que só aceita 1..k, removeu as 3 citações e os 3 related, e related ficou vazio.
+- **Por quê: erro de formato do LLM, e o guardrail descartou referências legítimas.** O defeito aparece na explicação: "Isso é confirmado como um bug conhecido em, onde a busca não aparece… também é relatado em e, que discutem…". A frase fica com buracos. No lógico + split o modelo usou os `n` certos e as mesmas 3 issues foram aceitas como related. Faltou também `area:search`, um caso de várias áreas (20 das 216 issues têm mais de uma `area:`).
 
 ### ❌ Erro 3: #34593 "Not documented changes regarding Analytics plugin API" (busca falhou)
 - **Esperado:** `area:documentation`. Itens: docs `building-plugins/08-analytics`, `plugins/analytics`, `building-apps/08-migrating` (+ 2 PRs).
@@ -124,11 +124,14 @@ As duas configurações padrão são **base (b)** e **lógico + split**. O "gaba
 7. **Testset com issues quase repetidas:** #34625, #34626 e #34627 têm o mesmo título ("Remove ESM transform workarounds once Node 22 is dropped") e pesam 3 vezes.
 
 ### Riscos, falhas e alucinações observadas
-- **Alucinação de referências:**
-  - sem guardrails, 22 refs fora das fontes em 30 issues;
-  - na busca2 (864 respostas), o código removeu: **related em 29 respostas (94 itens)**, citações em 11 (26), labels fora da lista em 14 (14: `area:proxy` ×4, `needs:triage` ×4, `area:backend` ×3…), menções em 4, docs em 2.
-  - Resultado final: **0 labels alucinados e 0 refs fora das fontes**.
-- **Remoção deixa texto quebrado** (#34747): o risco passa de "inventar" para "explicação incompleta".
+- **Alucinações e remoções pelos guardrails** (busca2, 864 respostas):
+  - **labels fora da lista: 14** (`area:proxy` ×4, `needs:triage` ×4, `area:backend` ×3…). São invenção real, barrada pelo código;
+  - **related: 94 itens em 29 respostas.** Todos eram o *número da issue/PR* (ex.: `30542`) no lugar do índice do trecho, e o item **estava** nas fontes. É erro de formato, e o guardrail descartou referências legítimas;
+  - **citações: 26 em 11 respostas.** 23 com o mesmo erro de formato, 2 com `[n]` maior que k e 1 número fora das fontes;
+  - docs: 2, também erro de formato; menções: 4 (`#10`);
+  - na bateria de guardrails, os "22 refs fora das fontes" sem guardrail são **artefato da medição**: sem guardrail o related não é mapeado e sai com `doc_id` vazio, contado como fora das fontes;
+  - resultado final: 0 labels fora da lista e 0 refs fora das fontes na saída.
+- **Remoção deixa texto quebrado e perde referências boas** (#34747): o modelo usou o nº da issue como `[n]`, e o guardrail apagou citações e related corretos.
 - **Bug de related duplicado** em 6,5% das respostas.
 - **Riscos do colega [colega]:**
   - com o JSON schema forçado no vLLM, **44 respostas com RAG (18%)** entraram em loop de espaços até o limite de tokens; 33 tiveram de ser refeitas sem schema;
@@ -165,20 +168,20 @@ As duas configurações padrão são **base (b)** e **lógico + split**. O "gaba
 **Slide B — Por que cada técnica (projeto)**
 - BGE-M3: aberto, multilíngue, textos longos · Chroma: embutido, sem servidor, filtro por metadado
 - Qwen3.5-9B fp8 no vLLM/Modal: modelo aberto, cabe em 24 GB, JSON, scale-to-zero (~US$ 15,6 em todos os testes)
-- Guardrails no código: refs fora das fontes 22 → 0; recusa fora do tema 95%
+- Guardrails no código: 14 labels inventados barrados; F1 0,72 → 0,78; recusa fora do tema 95%
 - Corte T = 22/04/2026 + `[ref]`: sem vazamento da resposta
 
 **Slide C — Acertos e erros**
 - ✅ #34070: labels exatos + 2 issues que o autor citava (mascaradas) reencontradas
 - ✅ #34395: `integration:gitlab` + mesma causa raiz em #28190 (dez/2024)
 - ❌ #34022: `openapi-tooling` × `catalog`: busca certa, LLM errou (e ignorou "Project Area")
-- ❌ #34747: inventou 3 citações → guardrail removeu, mas a frase ficou com buracos
+- ❌ #34747: citou pelo nº da issue em vez do `[n]` → guardrail apagou 3 refs corretas, frase com buracos
 - ❌ #34593: busca não trouxe a doc de analytics → área chutada
 - Padrão: nas falhas de related, 26 de 32 vêm da **busca**, não do LLM; `area:` é a família mais difícil
 
 **Slide D — Limitações, riscos e próximos passos**
 - Recall@10 ~0,6 e precisão de related ~20%: a recuperação é o gargalo
 - Gabarito pequeno (82), ruído de ~5 pp entre rodadas, labels de hoje; o v4 provisório é otimista
-- Alucinações barradas: 94 related + 26 citações + 14 labels removidos em 864 respostas · related duplicado em 6,5%
+- Guardrails em 864 respostas: 14 labels inventados barrados; 94 related + 23 citações removidos eram erro de formato (nº da issue no lugar de `[n]`) · related duplicado em 6,5%
 - Entrada sem `[ref]` e "Project Area" como texto · denso 8.192 × 1.024 · cold start de ~1 min · loop de JSON (colega, 18%) · CVE do Next
 - Próximos: anotação humana, consulta própria para o BM25, dedupe de saída, triagem com × sem RAG

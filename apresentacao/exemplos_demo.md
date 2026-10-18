@@ -49,15 +49,15 @@ No corpo das issues, `[ref]` marca as referências a issues e PRs que mascaramos
 - **Gabarito:** labels `area:catalog` e `type:bug`. Esta issue não tem itens no gabarito.
 - **Por quê:** a resposta é plausível, já que o Swagger fica no plugin de API docs, mas os mantenedores usam `area:catalog`. A ambiguidade está no próprio conjunto de labels, e o modelo ignorou o campo "Project Area" do formulário. A busca, por outro lado, trouxe a issue antiga com o mesmo bug (#28725). Ou seja: a recuperação acertou e a classificação errou.
 
-## ⚠️ Erro 2: citações fora do contexto, barradas pelos guardrails
+## ⚠️ Erro 2: citação pelo número da issue, apagada pelos guardrails
 - **Issue:** #34747 "Scaffolder ListTasksPage search only works per page": https://github.com/backstage/backstage/issues/34747
 - **Trecho:** "Scaffolder ListTasksPage search only works per page and does not persist on new page load (table)." Project Area: **Search**.
 - **Saída (base/(b)):**
   - labels `type:bug` e `area:scaffolder`.
-  - O modelo citou #30542, #32353 e #32271, que **não estavam nos trechos recuperados**. Os guardrails removeram essas citações e os itens relacionados (`removed.related = [30542, 32353, 32271]`), então related ficou vazio.
+  - O modelo escreveu `[30542]`, `[32353]`, `[32271]` (o número da issue) em vez do número do trecho. As 3 issues **estavam** nos trechos recuperados (posições 1, 4 e 5). Os guardrails, que só aceitam 1..10, removeram as citações e os related (`removed.related = [30542, 32353, 32271]`), e related ficou vazio.
   - Explicação depois da limpeza: "…Isso é confirmado como um bug conhecido em, onde a busca não aparece…". A frase ficou com buracos onde estavam as citações.
 - **Gabarito:** labels `area:scaffolder`, `area:search` e `type:bug`. Faltou `area:search`, um caso de várias áreas ao mesmo tempo.
-- **Por quê:** mostra o modelo inventando referências e a proteção funcionando. Na rodada (b) da bateria, as referências fora das fontes caíram de 22 para 0. No índice lógico/split, as mesmas issues vieram nos trechos e foram aceitas como related legítimas. Limitação: a explicação fica truncada, e o ideal seria reescrever a frase em vez de só apagar a citação.
+- **Por quê:** é um erro de formato do LLM, não uma invenção, e o guardrail rígido acabou apagando referências corretas. Em todas as 864 respostas da busca2, os 94 related removidos tinham esse mesmo padrão. No índice lógico/split o modelo usou os `n` certos e as mesmas issues foram aceitas. Melhoria proposta (não testada): converter o nº da issue no `n` do trecho quando ela está no contexto, e reescrever a frase em vez de deixar buracos.
 
 ---
 Números de apoio:
