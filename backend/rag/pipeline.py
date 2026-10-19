@@ -209,6 +209,7 @@ async def chat_once(services: Services, messages: list[Message], cfg: RagConfig,
             _log(services, endpoint, plan.cfg, plan.question, retrieval=plan.retrieval, error=str(exc))
             raise
         timings["llm"] = _ms(t_llm)
+        answer, _ = gr.normalize_citations(answer, plan.retrieval.hits if plan.retrieval else [], [plan.question])
         if _strip_enabled(plan):
             answer, removed = gr.strip_invalid_citations(answer, plan.k)
         if plan.mentions is not None:
@@ -239,7 +240,8 @@ def sse(event: str, data: dict[str, Any]) -> str:
 async def chat_stream(services: Services, plan: ChatPlan) -> AsyncIterator[str]:
     """Eventos SSE na ordem: sources -> token* -> done (ou error)."""
     timings = dict(plan.timings)
-    filt = gr.CitationStreamFilter(plan.k, enabled=_strip_enabled(plan))
+    hits = plan.retrieval.hits if plan.retrieval else []
+    filt = gr.CitationStreamFilter(plan.k, enabled=_strip_enabled(plan), hits=hits, user_texts=[plan.question])
     error: str | None = None
     emitted: list[str] = []
     removed_mentions: list[str] = []
@@ -400,7 +402,9 @@ async def triage_once(services: Services, title: str, body: str, cfg: RagConfig,
     # Guardrails ligados: as três camadas (gate, prompt estrito, validação de saída).
     # Desligados: nada é validado, pra comparação mostrar o modelo "cru".
     mentions = gr.MentionGuard(hits, [title, body]) if (cfg.guardrails and hits is not None) else None
-    guarded = gr.guard_triage(output, hits or [], services.allowed_labels, enabled=cfg.guardrails, mention_guard=mentions)
+    guarded = gr.guard_triage(
+        output, hits or [], services.allowed_labels, enabled=cfg.guardrails, mention_guard=mentions, user_texts=[title, body]
+    )
     if cfg.related_min_score is not None and hits:
         # RELATED_MIN_SCORE: tira related vindos de trechos com score de busca baixo
         kind = getattr(services.settings, "related_score_kind", "dense")

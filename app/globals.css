@@ -302,3 +302,23 @@ form.composer { padding: 8px var(--gutter) 18px; }
 }
 .send:hover:not(:disabled) { opacity: 0.9; }
 .send:disabled { opacity: 0.35; cursor: default; }
+
+/* Triagem: exemplos para a demonstração */
+.demo-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.demo-picker label { font-size: 13px; color: var(--muted); }
+.demo-picker select {
+  flex: 1; min-width: 0; background: var(--in-bubble); color: var(--text); border: 1px solid transparent;
+  border-radius: 12px; padding: 8px 12px; font: inherit; font-size: 14px; cursor: pointer;
+}
+.demo-picker select:focus { outline: none; border-color: var(--muted); }
+.expected { border-style: dashed; }
+.expected-note { margin: 8px 0 0; font-size: 13px; }
+.pill.hit { background: var(--out-bubble); color: var(--out-text); }
+.pill.miss { color: var(--warn); border: 1px solid var(--warn); background: none; }
+.pill.other { color: var(--muted); background: none; border: 1px dashed var(--border); }
+.expected-related { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.expected-related li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.expected-related .mark { width: 14px; font-weight: 700; }
+.expected-related li.miss .mark { color: var(--warn); }
+.expected-related li.partial .mark { color: var(--muted); }
+.expected-related .status-text { font-size: 12px; }

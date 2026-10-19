@@ -1,0 +1,529 @@
+diff -ruN -x __pycache__ -x .pytest_cache orig/backend/.env.example work/backend/.env.example
+--- orig/backend/.env.example	2026-10-17 20:25:25.333719887 -0300
++++ work/backend/.env.example	2026-10-17 20:28:46.345719887 -0300
+@@ -30,3 +30,13 @@
+ MIN_SCORE_DENSE=0.55
+ MIN_SCORE_RERANK=-1.0
+ MIN_SCORE_BM25=
++
++# Ajudas de precisão da triagem (padrão: ligadas). A requisição pode sobrescrever com
++# config.neighbor_labels / config.label_descriptions (true/false).
++#   TRIAGE_NEIGHBOR_LABELS: põe no prompt os labels reais das 5 issues/PRs mais parecidas
++#   TRIAGE_LABEL_DESCRIPTIONS: descrição de 1 linha por label + 3 exemplos de triagem resolvidos
++#   TRIAGE_NEIGHBOR_CUTOFF: ignora vizinhos criados depois desta data (evita vazamento no testset); vazio desliga
++TRIAGE_NEIGHBOR_LABELS=true
++TRIAGE_LABEL_DESCRIPTIONS=true
++TRIAGE_NEIGHBOR_K=5
++TRIAGE_NEIGHBOR_CUTOFF=2026-04-22T00:00:00Z
+diff -ruN -x __pycache__ -x .pytest_cache orig/backend/modal_app.py work/backend/modal_app.py
+--- orig/backend/modal_app.py	2026-10-17 20:25:25.333719887 -0300
++++ work/backend/modal_app.py	2026-10-17 20:28:37.645719887 -0300
+@@ -98,6 +98,10 @@
+             "MIN_SCORE_DENSE": MIN_SCORE_DENSE,
+             "MIN_SCORE_RERANK": MIN_SCORE_RERANK,
+             "MIN_SCORE_BM25": MIN_SCORE_BM25,
++            # Ajudas de precisão da triagem (rag/triage_aids.py); cada requisição pode sobrescrever no config
++            "TRIAGE_NEIGHBOR_LABELS": os.environ.get("TRIAGE_NEIGHBOR_LABELS", "true"),
++            "TRIAGE_LABEL_DESCRIPTIONS": os.environ.get("TRIAGE_LABEL_DESCRIPTIONS", "true"),
++            "TRIAGE_NEIGHBOR_CUTOFF": os.environ.get("TRIAGE_NEIGHBOR_CUTOFF", "2026-04-22T00:00:00Z"),
+         }
+     )
+     .add_local_file(str(PROJECT / "data" / "labels.json"), "/root/data/labels.json")
+diff -ruN -x __pycache__ -x .pytest_cache orig/backend/rag/pipeline.py work/backend/rag/pipeline.py
+--- orig/backend/rag/pipeline.py	2026-10-17 20:25:25.333719887 -0300
++++ work/backend/rag/pipeline.py	2026-10-17 21:16:46.561719887 -0300
+@@ -16,6 +16,7 @@
+ from .schemas import CompareRequest, Message, RagConfig
+ from .settings import Settings
+ from .text import clean_issue_body
++from .triage_aids import neighbor_labels, parse_cutoff
+ 
+ DEFAULT_TOP_K = {"chat": 8, "triage": 10}
+ 
+@@ -68,12 +69,17 @@
+ 
+ def effective_config(services: Services, cfg: RagConfig, mode: str) -> RagConfig:
+     reranker_ok = bool(services.settings.enable_reranker and services.retriever and services.retriever.has_reranker)
+-    return cfg.model_copy(
+-        update={
+-            "top_k": cfg.top_k or DEFAULT_TOP_K[mode],
+-            "reranker": bool(cfg.rag and cfg.reranker and reranker_ok),
+-        }
+-    )
++    settings = services.settings
++    update: dict[str, Any] = {
++        "top_k": cfg.top_k or DEFAULT_TOP_K[mode],
++        "reranker": bool(cfg.rag and cfg.reranker and reranker_ok),
++    }
++    if mode == "triage":
++        nb = cfg.neighbor_labels if cfg.neighbor_labels is not None else getattr(settings, "triage_neighbor_labels", True)
++        ld = cfg.label_descriptions if cfg.label_descriptions is not None else getattr(settings, "triage_label_descriptions", True)
++        update["neighbor_labels"] = bool(nb and cfg.rag)  # sem RAG não há vizinhos
++        update["label_descriptions"] = bool(ld)
++    return cfg.model_copy(update=update)
+ 
+ 
+ async def run_retrieval(services: Services, query: str, cfg: RagConfig) -> RetrievalResult:
+@@ -310,7 +316,18 @@
+             return _empty_triage(cfg, timings, refused=True, explanation=gr.REFUSAL_TEXT)
+         hits = result.hits
+ 
+-    msgs = triage_messages(services.prompts, title, body_for_llm, hits, services.labels, strict=cfg.guardrails)
++    neighbors = None
++    if cfg.neighbor_labels and hits:
++        settings = services.settings
++        neighbors = neighbor_labels(
++            hits, title,
++            cutoff_ts=parse_cutoff(getattr(settings, "triage_neighbor_cutoff", None)),
++            k=int(getattr(settings, "triage_neighbor_k", 5)),
++        )
++    msgs = triage_messages(
++        services.prompts, title, body_for_llm, hits, services.labels, strict=cfg.guardrails,
++        neighbors=neighbors, label_descriptions=bool(cfg.label_descriptions),
++    )
+     t_llm = time.perf_counter()
+     try:
+         output, error = await _triage_llm(services, msgs)
+@@ -333,6 +350,7 @@
+     _log(
+         services, endpoint, cfg, query,
+         retrieval=result, timings_ms=timings, refused=False, removed=guarded.removed, input_truncated=truncated,
++        neighbor_labels=neighbors,
+     )
+     return _empty_triage(
+         cfg, timings,
+@@ -344,6 +362,7 @@
+         explanation=guarded.explanation,
+         sources=sources,
+         removed=guarded.removed,
++        neighbor_labels=neighbors,
+     )
+ 
+ 
+diff -ruN -x __pycache__ -x .pytest_cache orig/backend/rag/prompts.py work/backend/rag/prompts.py
+--- orig/backend/rag/prompts.py	2026-10-17 20:25:25.333719887 -0300
++++ work/backend/rag/prompts.py	2026-10-17 20:27:44.813719887 -0300
+@@ -2,7 +2,7 @@
+ 
+ Os textos padrão estão aqui; para editar sem mexer no código, crie/edite
+ `prompts/<nome>.txt` (ou `PROMPTS_DIR`) ou a chave `prompts.<nome>` do config.yaml.
+-Nomes: chat_strict, chat_simple, triage_strict, triage_simple, triage_schema.
++Nomes: chat_strict, chat_simple, triage_strict, triage_simple, triage_schema, triage_examples.
+ """
+ from __future__ import annotations
+ 
+@@ -43,6 +43,10 @@
+     ),
+ }
+ 
++from .triage_aids import TRIAGE_EXAMPLES  # noqa: E402
++
++DEFAULT_PROMPTS["triage_examples"] = TRIAGE_EXAMPLES
++
+ HISTORY_LIMIT = 6  # mensagens anteriores incluídas no prompt do /chat
+ 
+ 
+@@ -66,8 +70,8 @@
+     blocks = []
+     for n, hit in enumerate(hits, start=1):
+         meta = hit.metadata
+-        number = meta.get("number")
+-        ref = f"{meta.get('type', '')} #{number}" if number not in (None, "") else str(meta.get("type", ""))
++        number = hit.number  # None para docs/ADRs (number vazio ou -1)
++        ref = f"{meta.get('type', '')} #{number}" if number is not None else (hit.doc_id or str(meta.get("type", "")))
+         header = f"[{n}] ({ref}) {meta.get('title', '')} - {meta.get('url', '')}".strip()
+         blocks.append(f"{header}\n{hit.text.strip()}")
+     return "\n\n".join(blocks)
+@@ -100,14 +104,32 @@
+     hits: list["Hit"] | None,
+     labels: list[dict[str, Any]],
+     strict: bool,
++    neighbors: list[dict[str, Any]] | None = None,
++    label_descriptions: bool = False,
+ ) -> list[dict[str, str]]:
++    """Mensagens da triagem.
++
++    neighbors: labels reais das issues/PRs parecidas (TRIAGE_NEIGHBOR_LABELS), já filtrados contra vazamento.
++    label_descriptions: descrição de uma linha por label + exemplos resolvidos (TRIAGE_LABEL_DESCRIPTIONS).
++    """
++    from .triage_aids import format_neighbors, label_description
++
+     system = prompts.get("triage_strict" if strict else "triage_simple") + "\n\n" + prompts.get("triage_schema")
+-    label_lines = "\n".join(
+-        f"- {lb['name']}" + (f": {lb['description']}" if lb.get("description") else "") for lb in labels
+-    )
++    if label_descriptions:
++        label_lines = "\n".join(
++            f"- {lb['name']}" + (f": {d}" if (d := label_description(lb)) else "") for lb in labels
++        )
++    else:
++        label_lines = "\n".join(
++            f"- {lb['name']}" + (f": {lb['description']}" if lb.get("description") else "") for lb in labels
++        )
+     parts = [f"LABELS PERMITIDAS:\n{label_lines}"]
++    if label_descriptions:
++        parts.append(prompts.get("triage_examples"))
+     if hits is not None:
+         parts.append(f"CONTEXTO:\n{format_context(hits) or '(nenhum trecho encontrado)'}")
++    if neighbors:
++        parts.append(format_neighbors(neighbors))
+     parts.append(f"ISSUE NOVA:\nTítulo: {title}\n\n{body}")
+     return [{"role": "system", "content": system}, {"role": "user", "content": "\n\n".join(parts)}]
+ 
+diff -ruN -x __pycache__ -x .pytest_cache orig/backend/rag/retrieval.py work/backend/rag/retrieval.py
+--- orig/backend/rag/retrieval.py	2026-10-17 20:25:25.337719887 -0300
++++ work/backend/rag/retrieval.py	2026-10-17 21:16:46.561719887 -0300
+@@ -42,7 +42,9 @@
+     @property
+     def number(self) -> int | None:
+         value = self.metadata.get("number")
+-        return int(value) if isinstance(value, int) or str(value).isdigit() else None
++        number = int(value) if isinstance(value, int) or str(value).isdigit() else None
++        # docs/ADRs vêm com number=-1 (ou vazio): sem número, a citação usa o doc_id
++        return number if number is not None and number > 0 else None
+ 
+     @property
+     def source_label(self) -> str:
+diff -ruN -x __pycache__ -x .pytest_cache orig/backend/rag/schemas.py work/backend/rag/schemas.py
+--- orig/backend/rag/schemas.py	2026-10-17 20:25:25.337719887 -0300
++++ work/backend/rag/schemas.py	2026-10-17 21:16:46.565719887 -0300
+@@ -23,6 +23,9 @@
+     reranker: bool = False
+     guardrails: bool = True
+     top_k: int | None = Field(default=None, ge=1, le=50)
++    # Ajudas da triagem; None = usa o padrão do servidor (TRIAGE_NEIGHBOR_LABELS / TRIAGE_LABEL_DESCRIPTIONS)
++    neighbor_labels: bool | None = None
++    label_descriptions: bool | None = None
+ 
+ 
+ class Message(BaseModel):
+@@ -116,6 +119,8 @@
+     timings_ms: dict[str, int] = Field(default_factory=dict)
+     refused: bool = False
+     error: str | None = None
++    # Labels reais das issues/PRs parecidas que entraram no prompt (TRIAGE_NEIGHBOR_LABELS)
++    neighbor_labels: list[dict[str, Any]] | None = None
+ 
+ 
+ # --------------------------------------------------------------------------- #
+diff -ruN -x __pycache__ -x .pytest_cache orig/backend/rag/settings.py work/backend/rag/settings.py
+--- orig/backend/rag/settings.py	2026-10-17 20:25:25.337719887 -0300
++++ work/backend/rag/settings.py	2026-10-17 21:16:46.565719887 -0300
+@@ -54,6 +54,11 @@
+     log_path: Path = Path("logs/requests.jsonl")
+     prompts_dir: Path = BACKEND_DIR / "prompts"
+     llm_timeout_s: float = 120.0  # LLM_TIMEOUT_S; no Modal é 300 pra esperar a partida a frio do vLLM
++    # Ajudas de precisão da triagem (rag/triage_aids.py); a requisição pode sobrescrever no config
++    triage_neighbor_labels: bool = True       # TRIAGE_NEIGHBOR_LABELS
++    triage_label_descriptions: bool = True    # TRIAGE_LABEL_DESCRIPTIONS
++    triage_neighbor_k: int = 5                # TRIAGE_NEIGHBOR_K
++    triage_neighbor_cutoff: str = "2026-04-22T00:00:00Z"  # TRIAGE_NEIGHBOR_CUTOFF ("" desliga o filtro de data)
+     config: dict[str, Any] = field(default_factory=dict)
+     min_score: dict[str, float | None] = field(default_factory=dict)
+ 
+@@ -137,6 +142,15 @@
+     return scores
+ 
+ 
++def _cfg_get(config: dict[str, Any], *keys: str, default: Any = None) -> Any:
++    node: Any = config
++    for key in keys:
++        if not isinstance(node, dict) or key not in node:
++            return default
++        node = node[key]
++    return node
++
++
+ def default_data_dir() -> Path:
+     """DATA_DIR; RAG_DATA_DIR ainda vale (modal_app.py usa). Padrão: /data no Modal, ./data_full local."""
+     for name in ("DATA_DIR", "RAG_DATA_DIR"):
+@@ -175,6 +189,14 @@
+         labels_path=Path(labels_env) if labels_env else None,
+         log_path=Path(os.getenv("LOG_DIR", "logs")) / "requests.jsonl",
+         prompts_dir=Path(os.getenv("PROMPTS_DIR", str(BACKEND_DIR / "prompts"))),
++        triage_neighbor_labels=_env_bool("TRIAGE_NEIGHBOR_LABELS", bool(_cfg_get(config, "triage", "neighbor_labels", default=True))),
++        triage_label_descriptions=_env_bool(
++            "TRIAGE_LABEL_DESCRIPTIONS", bool(_cfg_get(config, "triage", "label_descriptions", default=True))
++        ),
++        triage_neighbor_k=int(os.getenv("TRIAGE_NEIGHBOR_K") or _cfg_get(config, "triage", "neighbor_k", default=5)),
++        triage_neighbor_cutoff=os.getenv(
++            "TRIAGE_NEIGHBOR_CUTOFF", str(_cfg_get(config, "triage", "neighbor_cutoff", default=config.get("cutoff") or "2026-04-22T00:00:00Z"))
++        ),
+         config=config,
+         min_score=_min_scores(config),
+     )
+diff -ruN -x __pycache__ -x .pytest_cache orig/backend/rag/triage_aids.py work/backend/rag/triage_aids.py
+--- orig/backend/rag/triage_aids.py	1969-12-31 21:00:00.000000000 -0300
++++ work/backend/rag/triage_aids.py	2026-10-17 20:27:18.473719887 -0300
+@@ -0,0 +1,168 @@
++"""Ajudas de precisão para a triagem (podem ser ligadas/desligadas por env ou por requisição).
++
++A) Labels dos vizinhos (TRIAGE_NEIGHBOR_LABELS): os labels reais (type:/area:/integration:) das
++   issues/PRs mais parecidas que a busca trouxe entram no prompt como referência ("few-shot").
++   Proteção contra vazamento: ignora a própria issue (mesmo título) e tudo criado depois do corte
++   (TRIAGE_NEIGHBOR_CUTOFF, padrão 2026-04-22, o mesmo corte do testset).
++B) Descrições dos labels + exemplos resolvidos (TRIAGE_LABEL_DESCRIPTIONS): uma linha por label de
++   triagem (as do labels.json têm prioridade quando existem) e 3 triagens de exemplo de issues
++   anteriores ao corte que NÃO estão no testset.
++"""
++from __future__ import annotations
++
++import re
++import unicodedata
++from datetime import datetime, timezone
++from typing import TYPE_CHECKING, Any
++
++if TYPE_CHECKING:
++    from .retrieval import Hit
++
++NEIGHBOR_PREFIXES = ("type:", "area:", "integration:")
++NEIGHBOR_TYPES = {"issue", "pr"}
++DEFAULT_CUTOFF = "2026-04-22T00:00:00Z"
++
++# Uma linha por label; usadas quando o labels.json não tem descrição (ou tem uma muito vaga).
++LABEL_DESCRIPTIONS: dict[str, str] = {
++    "type:bug": "Algo não funciona como deveria (erro, crash, regressão, comportamento errado).",
++    "type:suggestion": "Pedido de funcionalidade nova ou melhoria de algo que já funciona.",
++    "type:docs": "Problema ou pedido na documentação (docs faltando, erradas ou confusas).",
++    "type:maintenance": "Manutenção: atualização de dependências, limpeza, refatoração, CI.",
++    "area:auditor": "Plugin/serviço de auditoria (auditor) e eventos de auditoria.",
++    "area:auth": "Autenticação e login: providers (GitHub, GitLab, Google, OIDC...), sessões, tokens de usuário, sign-in resolvers.",
++    "area:catalog": "Software Catalog: entidades, catalog-info.yaml, processors, entity providers, ingestão, relações.",
++    "area:core": "Núcleo do framework Backstage (core-*), APIs centrais do app.",
++    "area:design-system": "Componentes de UI / design system (Backstage UI, core-components, temas).",
++    "area:discoverability": "Encontrar coisas no portal: navegação, catálogo/explore, experiência de descoberta.",
++    "area:documentation": "Melhorias ou adições à documentação do projeto.",
++    "area:events": "Events backend / event bus e módulos de eventos (webhooks).",
++    "area:framework": "Frameworks de plugin: new frontend system, backend system, extensões, service-to-service auth, DI.",
++    "area:home": "Plugin Home (página inicial personalizável).",
++    "area:kubernetes": "Plugin Kubernetes (ver workloads no Backstage) - não é sobre fazer deploy do Backstage em k8s.",
++    "area:microsite": "Site backstage.io (microsite).",
++    "area:notifications": "Plugin de notificações e signals.",
++    "area:openapi-tooling": "Ferramentas de OpenAPI (repo-tools schema, clientes gerados, validação).",
++    "area:operations": "Operar o Backstage: deploy, Docker, configuração em produção, banco de dados, performance, observabilidade.",
++    "area:permission": "Permission framework: políticas, regras, conditional decisions, RBAC.",
++    "area:scaffolder": "Scaffolder / Software Templates: templates, actions (publish:*, fetch:*), dry-run, task runs.",
++    "area:search": "Search: indexação, collators, engines (Lunr, Postgres, Elasticsearch/OpenSearch), UI de busca.",
++    "area:storybook": "Storybook dos componentes.",
++    "area:techdocs": "TechDocs: geração/publicação de docs (mkdocs, techdocs-cli), leitor e add-ons.",
++    "area:tooling": "Ferramentas de desenvolvimento: backstage-cli, create-app, build, lint, testes, yarn, versões do Node.",
++    "integration:aws": "Envolve AWS (S3, CodeCommit, ECR, Cognito, ALB...).",
++    "integration:azure": "Envolve Azure / Azure DevOps (repos, pipelines, Entra ID/MS Graph).",
++    "integration:bitbucket-cloud": "Envolve Bitbucket Cloud (bitbucket.org).",
++    "integration:bitbucket-server": "Envolve Bitbucket Server / Data Center (self-hosted).",
++    "integration:gcp": "Envolve Google Cloud (GCS, GKE, IAP, Google auth).",
++    "integration:gerrit": "Envolve Gerrit.",
++    "integration:gitea": "Envolve Gitea.",
++    "integration:github": "Envolve GitHub (GitHub App, tokens, publish:github, github org/provider, GitHub Enterprise).",
++    "integration:gitlab": "Envolve GitLab (gitlab.com ou self-hosted: OAuth, provider, publish:gitlab).",
++    "integration:other": "Envolve outra integração externa que não tem label própria.",
++}
++_VAGUE = re.compile(r"^related to the .* project area$", re.I)
++
++TRIAGE_EXAMPLES = """EXEMPLOS RESOLVIDOS (issues antigas, com os labels que os mantenedores aplicaram):
++
++Exemplo 1 - "[plugin-scaffolder-backend-module-github] customProperties should support a list of strings"
++Resumo: ao passar uma lista em customProperties no publish:github, a action falha com "is not of a type(s) string" depois de atualizar o módulo GitHub do scaffolder.
++Labels: type:bug, area:scaffolder, integration:github
++Por quê: erro (bug) numa action do Scaffolder (publish:github) que fala com o GitHub.
++
++Exemplo 2 - "GitLab OAuth fails with 'Missing session cookie' despite correct CORS"
++Resumo: login com o provider GitLab falha com AuthenticationError "Missing session cookie" após seguir a doc de auth.
++Labels: type:bug, area:auth, integration:gitlab
++Por quê: falha de login (auth) com o provider do GitLab. Faltam detalhes de config, então needs_more_info pode ser true.
++
++Exemplo 3 - "TechDocs Preview is broken in 1.8.8, 1.8.9"
++Resumo: `npx @techdocs/cli serve` devolve 404 nas versões novas; versões antigas funcionam (regressão).
++Labels: type:bug, area:techdocs
++Por quê: regressão do techdocs-cli. Não envolve integração externa, então nenhum integration:*.
++
++Regras práticas: use exatamente um type:*; use area:* da parte do Backstage afetada (normalmente 1); use integration:* SÓ quando a issue envolve um provedor externo específico (GitHub, GitLab, Azure, AWS...)."""
++
++
++def label_description(label: dict[str, Any]) -> str:
++    """Descrição de uma linha: a do labels.json, a não ser que esteja vazia/vaga."""
++    own = str(label.get("description") or "").strip()
++    ours = LABEL_DESCRIPTIONS.get(str(label.get("name", "")))
++    if ours and (not own or _VAGUE.match(own) or len(own) < 25):
++        return ours
++    return own or (ours or "")
++
++
++def parse_cutoff(value: str | None) -> float | None:
++    """ISO 8601 -> epoch (s). Vazio/"none" desliga o filtro de data."""
++    if value is None:
++        value = DEFAULT_CUTOFF
++    value = value.strip()
++    if not value or value.lower() in {"none", "off", "false", "0"}:
++        return None
++    dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
++    if dt.tzinfo is None:
++        dt = dt.replace(tzinfo=timezone.utc)
++    return dt.timestamp()
++
++
++def _norm_title(text: str) -> str:
++    text = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().lower()
++    return re.sub(r"[^a-z0-9]+", " ", text).strip()
++
++
++def _created_ts(value: Any) -> float | None:
++    if value in (None, ""):
++        return None
++    if isinstance(value, (int, float)):
++        return float(value) / (1000.0 if value > 1e11 else 1.0)
++    try:
++        return parse_cutoff(str(value))
++    except ValueError:
++        return None
++
++
++def _labels_of(meta: dict[str, Any]) -> list[str]:
++    raw = meta.get("labels") or ""
++    items = raw if isinstance(raw, list) else re.split(r"[|,]", str(raw))
++    return [s.strip() for s in items if s and s.strip().startswith(NEIGHBOR_PREFIXES)]
++
++
++def neighbor_labels(
++    hits: list["Hit"],
++    title: str,
++    cutoff_ts: float | None,
++    k: int = 5,
++) -> list[dict[str, Any]]:
++    """Labels reais das k issues/PRs mais parecidas (na ordem da busca), sem vazamento.
++
++    Exclui: a própria issue (título igual), itens criados depois do corte e itens sem labels de triagem.
++    Retorna [{"n": nº do trecho no CONTEXTO, "ref": "issue #123", "doc_id", "labels": [...]}].
++    """
++    me = _norm_title(title)
++    out: list[dict[str, Any]] = []
++    seen: set[str] = set()
++    for n, hit in enumerate(hits, start=1):
++        meta = hit.metadata or {}
++        kind = str(meta.get("type", ""))
++        if kind not in NEIGHBOR_TYPES or hit.doc_id in seen:
++            continue
++        seen.add(hit.doc_id)
++        if me and _norm_title(str(meta.get("title", ""))) == me:
++            continue  # a própria issue
++        created = _created_ts(meta.get("created_at"))
++        if cutoff_ts is not None and created is not None and created >= cutoff_ts:
++            continue  # posterior ao corte
++        labels = _labels_of(meta)
++        if not labels:
++            continue
++        out.append({"n": n, "ref": hit.source_label, "doc_id": hit.doc_id, "labels": labels})
++        if len(out) >= k:
++            break
++    return out
++
++
++def format_neighbors(neighbors: list[dict[str, Any]]) -> str:
++    lines = [f"- [{nb['n']}] {nb['ref']}: {', '.join(nb['labels'])}" for nb in neighbors]
++    return (
++        "LABELS DAS ISSUES/PRS PARECIDAS (labels reais aplicados pelos mantenedores; use como referência, "
++        "não copie sem conferir se valem para a issue nova):\n" + "\n".join(lines)
++    )
+diff -ruN -x __pycache__ -x .pytest_cache orig/backend/tests/test_melhorias.py work/backend/tests/test_melhorias.py
+--- orig/backend/tests/test_melhorias.py	1969-12-31 21:00:00.000000000 -0300
++++ work/backend/tests/test_melhorias.py	2026-10-17 20:28:28.129719887 -0300
+@@ -0,0 +1,99 @@
++"""Ajudas de precisão da triagem: labels dos vizinhos (A), descrições + exemplos (B) e citação de docs."""
++from __future__ import annotations
++
++import json
++
++from fastapi.testclient import TestClient
++
++from rag.prompts import format_context, triage_messages, PromptStore
++from rag.retrieval import Hit
++from rag.triage_aids import label_description, neighbor_labels, parse_cutoff
++
++RAG_CFG = {"rag": True, "index": "base", "search": "dense", "reranker": False, "guardrails": True}
++CUT = parse_cutoff("2026-04-22T00:00:00Z")
++OK_TRIAGE = json.dumps({"labels": [{"name": "type:bug", "confidence": "alta"}], "related": [], "docs": [], "explanation": "ok [1]"})
++
++
++def hit(doc_id: str, kind: str, number, title: str, labels: str = "", created=1_700_000_000) -> Hit:
++    meta = {"type": kind, "number": number, "title": title, "labels": labels, "created_at": created, "doc_id": doc_id}
++    return Hit(id=f"{doc_id}-000", doc_id=doc_id, text="x", metadata=meta, score=1.0)
++
++
++def test_neighbors_take_real_labels_of_similar_issues_and_prs() -> None:
++    hits = [
++        hit("doc-a", "doc", -1, "Doc A"),
++        hit("issue-1", "issue", 1, "Scaffolder quebra", "type:bug|area:scaffolder|needs:triage|integration:github"),
++        hit("issue-1", "issue", 1, "Scaffolder quebra", "type:bug|area:scaffolder"),  # 2º trecho do mesmo doc
++        hit("pr-2", "pr", 2, "fix scaffolder", "area:scaffolder"),
++    ]
++    nb = neighbor_labels(hits, "Nova issue", CUT)
++    assert [n["doc_id"] for n in nb] == ["issue-1", "pr-2"]
++    assert nb[0]["n"] == 2 and nb[0]["labels"] == ["type:bug", "area:scaffolder", "integration:github"]  # sem needs:*
++    assert nb[0]["ref"] == "issue #1"
++
++
++def test_neighbors_leakage_guard_excludes_self_and_post_cutoff() -> None:
++    hits = [
++        hit("issue-9", "issue", 9, "🐛 Swagger UI deep linking not working", "type:bug|area:catalog"),  # a própria issue
++        hit("issue-8", "issue", 8, "Outra", "type:bug|area:catalog", created=CUT + 10),  # depois do corte
++        hit("issue-7", "issue", 7, "Antiga", "type:suggestion|area:catalog", created=CUT - 10),
++    ]
++    nb = neighbor_labels(hits, "Swagger UI deep linking not working", CUT)
++    assert [n["doc_id"] for n in nb] == ["issue-7"]
++    assert len(neighbor_labels(hits, "Swagger UI deep linking not working", None)) == 2  # corte desligado
++    assert parse_cutoff("") is None
++
++
++def test_neighbors_respect_k() -> None:
++    hits = [hit(f"issue-{i}", "issue", i, f"t{i}", "type:bug") for i in range(1, 9)]
++    assert len(neighbor_labels(hits, "x", CUT, k=5)) == 5
++
++
++def test_label_descriptions_fill_missing_and_vague() -> None:
++    assert "GitHub" in label_description({"name": "integration:github", "description": ""})
++    assert "catalog-info" in label_description({"name": "area:catalog", "description": "Related to the Catalog Project Area"})
++    assert label_description({"name": "type:bug", "description": "Something isn't working at all here"}) == "Something isn't working at all here"
++
++
++def test_prompt_includes_aids_only_when_enabled() -> None:
++    labels = [{"name": "integration:github", "description": ""}]
++    hits = [hit("issue-1", "issue", 1, "t", "type:bug|integration:github")]
++    nb = neighbor_labels(hits, "x", CUT)
++    off = triage_messages(PromptStore(None, {}), "x", "y", hits, labels, strict=True)[1]["content"]
++    on = triage_messages(PromptStore(None, {}), "x", "y", hits, labels, strict=True, neighbors=nb, label_descriptions=True)[1]["content"]
++    assert "LABELS DAS ISSUES" not in off and "EXEMPLOS RESOLVIDOS" not in off and "- integration:github\n" in off + "\n"
++    assert "LABELS DAS ISSUES" in on and "[1] issue #1: type:bug, integration:github" in on
++    assert "EXEMPLOS RESOLVIDOS" in on and "integration:github: Envolve GitHub" in on
++
++
++def test_doc_citation_uses_doc_id_not_minus_one() -> None:
++    h = hit("doc-features/techdocs/README", "doc", -1, "TechDocs")
++    src = h.to_source(1)
++    assert src["source"] == "doc-features/techdocs/README" and src["number"] is None
++    assert "#-1" not in format_context([h])
++    assert hit("adr-012", "adr", "", "ADR").to_source(1)["source"] == "adr-012"
++    assert hit("issue-5", "issue", 5, "x").to_source(1)["source"] == "issue #5"
++
++
++def test_triage_api_toggles_per_request_and_defaults(client: TestClient, fake_llm, services) -> None:
++    store = services.retriever.indices["base"].store
++    store["issue-21034-000"].metadata.update({"labels": "type:bug|area:scaffolder|integration:github", "created_at": 1_600_000_000})
++    fake_llm.json_replies = [OK_TRIAGE]
++    body = {"title": "Scaffolder fails with GitHub app auth token"}
++    on = client.post("/triage", json={**body, "config": RAG_CFG}).json()
++    prompt_on = fake_llm.calls[-1]["messages"][1]["content"]
++    assert on["config"]["neighbor_labels"] is True and on["config"]["label_descriptions"] is True
++    assert any(n["doc_id"] == "issue-21034" for n in on["neighbor_labels"])
++    assert "LABELS DAS ISSUES" in prompt_on and "EXEMPLOS RESOLVIDOS" in prompt_on
++    off = client.post("/triage", json={**body, "config": {**RAG_CFG, "neighbor_labels": False, "label_descriptions": False}}).json()
++    prompt_off = fake_llm.calls[-1]["messages"][1]["content"]
++    assert off["neighbor_labels"] is None and "LABELS DAS ISSUES" not in prompt_off and "EXEMPLOS RESOLVIDOS" not in prompt_off
++
++
++def test_triage_aids_env_defaults(monkeypatch) -> None:
++    from rag.settings import load_settings
++    monkeypatch.setenv("TRIAGE_NEIGHBOR_LABELS", "false")
++    monkeypatch.setenv("TRIAGE_LABEL_DESCRIPTIONS", "0")
++    monkeypatch.setenv("TRIAGE_NEIGHBOR_CUTOFF", "")
++    s = load_settings()
++    assert s.triage_neighbor_labels is False and s.triage_label_descriptions is False and s.triage_neighbor_cutoff == ""

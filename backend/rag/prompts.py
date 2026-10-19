@@ -12,12 +12,20 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .retrieval import Hit
 
+# O contexto chega como "[3] (issue #20753) ...", e o modelo às vezes mistura e cita [issue #3].
+# A API também normaliza esses casos (guardrails.normalize_citations), mas é melhor pedir certo.
+CITATION_RULE = (
+    "Cite SOMENTE com o número do trecho entre colchetes, como [2] ou [2][5]. "
+    "Nunca escreva [issue #123], [#123], [doc ...] nem [issue nova]; "
+    "para falar da issue que está sendo triada, escreva 'a issue nova', sem colchetes."
+)
+
 DEFAULT_PROMPTS: dict[str, str] = {
     # Seção 7 da spec (guardrails=true)
     "chat_strict": (
         "Você é um assistente de triagem de issues do repositório backstage/backstage.\n"
         "Responda SOMENTE com base nos trechos fornecidos em CONTEXTO, numerados [1]..[k].\n"
-        "Cite o número do trecho em toda afirmação, assim: [2].\n"
+        "Cite o número do trecho em toda afirmação. " + CITATION_RULE + "\n"
         "Se o contexto não tiver a resposta, diga que não encontrou na base. "
         "Não invente issues, PRs, links, versões ou labels.\n"
         "Responda em português."
@@ -27,7 +35,7 @@ DEFAULT_PROMPTS: dict[str, str] = {
     "triage_strict": (
         "Você é um assistente de triagem de issues do repositório backstage/backstage.\n"
         "Use SOMENTE os trechos fornecidos em CONTEXTO, numerados [1]..[k].\n"
-        "Escolha labels SOMENTE da lista LABELS PERMITIDAS. Cite trechos na explicação, assim: [2].\n"
+        "Escolha labels SOMENTE da lista LABELS PERMITIDAS. Cite trechos na explicação. " + CITATION_RULE + "\n"
         "Em related e docs, use apenas números de trechos que existem no CONTEXTO.\n"
         "Não invente issues, PRs, links, versões ou labels. Escreva a explicação em português."
     ),
@@ -39,7 +47,7 @@ DEFAULT_PROMPTS: dict[str, str] = {
         ' "related": [{"n": 1, "reason": "string"}],\n'
         ' "docs": [{"n": 3}],\n'
         ' "needs_more_info": false,\n'
-        ' "explanation": "string com citações [n]"}'
+        ' "explanation": "string com citações no formato [n], só o número do trecho"}'
     ),
 }
 

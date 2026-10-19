@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 from .retrieval import Hit, RetrievalResult
 from .schemas import TriageLLMOutput
@@ -64,30 +64,140 @@ def strip_invalid_citations(text: str, k: int) -> tuple[str, list[int]]:
     return CITATION_RE.sub(repl, text), removed
 
 
-class CitationStreamFilter:
-    """Versão em streaming: segura um possível '[123' até fechar o colchete."""
+# --------------------------------------------------------------------------- #
+# Citações fora do formato [n]
+# O contexto chega como "[3] (issue #20753) título", e o modelo às vezes mistura:
+# escreve [issue #3] (número do trecho), [issue #28190] (número real da issue),
+# [#3], [doc-...], [1, 3] ou [issue nova]. Normalizamos tudo para [n] antes dos
+# guardrails e da contagem de trechos usados.
+# --------------------------------------------------------------------------- #
+BRACKET_RE = re.compile(r"\[([^\[\]\n]{1,80})\](?!\()")  # (?!\() pula links markdown [texto](url)
+REF_RE = re.compile(r"^(?:(?:issue|pr|pull request|pull|doc|adr|trecho|fonte|source)\s*)?#?\s*(\d+)$", re.I)
+SELF_REF_RE = re.compile(r"^(?:issue|pergunta)\s+(?:nova|atual)$|^nova\s+issue$", re.I)
+SELF_REF_TEXT = "(issue nova)"
+MAX_BRACKET = 80
 
-    def __init__(self, k: int, enabled: bool = True):
+
+def _ref_to_n(token: str, hits: list[Hit]) -> int | None:
+    """Um item de dentro dos colchetes -> número do trecho (ou o número cru, se não achar)."""
+    token = token.strip()
+    by_doc = {h.doc_id: n for n, h in enumerate(hits, start=1)}
+    by_chunk = {cid: n for n, h in enumerate(hits, start=1) for cid in (h.chunk_ids or [h.id])}
+    if token in by_doc or token in by_chunk:
+        return by_doc.get(token) or by_chunk.get(token)
+    m = REF_RE.match(token)
+    if not m:
+        return None
+    value = int(m.group(1))
+    has_prefix = token[0] in "#" or token[0].isalpha()
+    if has_prefix:  # "issue #28190" / "#600": primeiro tenta o número real da issue/PR
+        for n, h in enumerate(hits, start=1):
+            if h.number == value:
+                return n
+    return value  # "issue #3" / "3": número do trecho (fora de 1..k vira citação inválida)
+
+
+# No texto corrido o modelo também escreve "a issue #3 também relata..." usando o número
+# do TRECHO como se fosse o da issue (o trecho 3 é a #20753). O primeiro ramo casa um
+# colchete inteiro só para pulá-lo: o que está entre colchetes é tratado em normalize_citations.
+INDEX_MENTION_RE = re.compile(r"\[[^\[\]\n]*\]|(?<![\w#/])(issues?|PRs?|pull requests?)\s*#\s*(\d{1,3})(?!\d)", re.I)
+USER_HASH_RE = re.compile(r"#(\d+)")
+
+
+def fix_index_mentions(text: str, hits: list[Hit], user_texts: Iterable[str] = ()) -> tuple[str, int]:
+    """Troca "issue #K" (K = número de trecho) pela referência real do trecho K.
+    Não mexe se K for o número real de algum trecho, se aparecer no texto do usuário
+    ou se estiver fora de 1..k."""
+    if not hits:
+        return text, 0
+    real_numbers = {h.number for h in hits if h.number is not None}
+    user_numbers = {int(m) for t in user_texts for m in USER_HASH_RE.findall(t or "")}
+    changed = 0
+
+    def repl(match: re.Match[str]) -> str:
+        nonlocal changed
+        if match.group(1) is None:  # era um [colchete]: fica como está
+            return match.group(0)
+        word, k = match.group(1), int(match.group(2))
+        if not 1 <= k <= len(hits) or k in real_numbers or k in user_numbers:
+            return match.group(0)
+        hit = hits[k - 1]
+        changed += 1
+        if hit.number is None:  # doc/ADR não tem número: cita pelo título
+            title = str(hit.metadata.get("title") or hit.doc_id)
+            return f"doc “{title}” [{k}]"
+        if str(hit.metadata.get("type", "")) == "pr":
+            word = "PR"
+        elif word.lower().startswith("pr") or word.lower().startswith("pull"):
+            word = "issue"
+        return f"{word} #{hit.number}"
+
+    return INDEX_MENTION_RE.sub(repl, text), changed
+
+
+def normalize_citations(text: str, hits: list[Hit], user_texts: Iterable[str] = ()) -> tuple[str, int]:
+    """Reescreve citações fora do formato para [n] e corrige "issue #K" no texto corrido
+    quando K é o número de um trecho. Retorna (texto, quantas foram reescritas).
+    Sem trechos (modo sem RAG) não mexe em nada: não há a que mapear."""
+    changed = 0
+    if not hits:
+        return text, 0
+
+    def repl(match: re.Match[str]) -> str:
+        nonlocal changed
+        content = match.group(1).strip()
+        if content.isdigit():
+            return match.group(0)
+        parts = [p for p in re.split(r"\s*(?:,|;|\be\b|\band\b)\s*", content) if p]
+        self_ref = any(SELF_REF_RE.match(p) for p in parts)
+        ns = [_ref_to_n(p, hits) for p in parts if not SELF_REF_RE.match(p)]
+        if (not ns and not self_ref) or any(n is None for n in ns):
+            return match.group(0)  # não é citação (texto entre colchetes, checkbox, [ref] etc.)
+        changed += 1
+        refs = "".join(f"[{n}]" for n in dict.fromkeys(ns))
+        if self_ref:  # ex.: [issue nova, issue #3] -> "(issue nova) [3]"
+            return SELF_REF_TEXT + (f" {refs}" if refs else "")
+        return refs
+
+    text = BRACKET_RE.sub(repl, text)
+    text, fixed = fix_index_mentions(text, hits, user_texts)
+    return text, changed + fixed
+
+
+class CitationStreamFilter:
+    """Versão em streaming: segura um '[...' incompleto até fechar o colchete,
+    normaliza o formato e (com guardrails) remove citações inválidas."""
+
+    def __init__(
+        self, k: int, enabled: bool = True, hits: list[Hit] | None = None, user_texts: Iterable[str] = ()
+    ):
         self.k = k
         self.enabled = enabled
+        self.hits = hits or []
+        self.user_texts = list(user_texts)
         self.buffer = ""
         self.removed: list[int] = []
 
     def _split_safe(self) -> tuple[str, str]:
-        # Segura um '[' no final que ainda pode virar citação (ex.: "[1" ou " [")
-        match = re.search(r"\s?\[\d*$", self.buffer)
-        if match and len(self.buffer) - match.start() <= 8:
+        # Segura um '[' no final que ainda pode virar citação (ex.: "[1", " [issue #")
+        match = re.search(r"\s?\[[^\[\]\n]*$", self.buffer)
+        if match and len(self.buffer) - match.start() <= MAX_BRACKET + 2:
+            return self.buffer[: match.start()], self.buffer[match.start() :]
+        # Segura a última palavra, que pode ser o começo de "issue #3" ainda incompleto
+        match = re.search(r"(?:[A-Za-z]+\s*)?#?\s*\d*$", self.buffer)
+        if match and match.start() < len(self.buffer) and len(self.buffer) - match.start() <= 40:
             return self.buffer[: match.start()], self.buffer[match.start() :]
         return self.buffer, ""
 
     def _clean(self, text: str) -> str:
+        text, _ = normalize_citations(text, self.hits, self.user_texts)
+        if not self.enabled:
+            return text
         cleaned, removed = strip_invalid_citations(text, self.k)
         self.removed.extend(n for n in removed if n not in self.removed)
         return cleaned
 
     def feed(self, chunk: str) -> str:
-        if not self.enabled:
-            return chunk
         self.buffer += chunk
         ready, self.buffer = self._split_safe()
         return self._clean(ready)
@@ -259,6 +369,7 @@ def guard_triage(
     allowed_labels: set[str],
     enabled: bool = True,
     mention_guard: MentionGuard | None = None,
+    user_texts: Iterable[str] = (),
 ) -> TriageGuarded:
     """Camada de saída da triagem. Com `enabled=False` (guardrails desligados) nada é
     validado nem removido: labels, related, docs e explicação saem como o modelo gerou."""
@@ -311,9 +422,10 @@ def guard_triage(
         else:
             res.docs.append({"n": doc.n, "doc_id": "", "type": "", "title": "", "url": ""})
 
-    res.explanation = output.explanation
+    # O formato é sempre normalizado; remover citações inválidas é papel dos guardrails
+    res.explanation, _ = normalize_citations(output.explanation, hits, user_texts)
     if enabled:
-        res.explanation, res.removed["citations"] = strip_invalid_citations(output.explanation, len(hits))
+        res.explanation, res.removed["citations"] = strip_invalid_citations(res.explanation, len(hits))
         if mention_guard is not None:
             res.explanation, res.removed["mentions"] = mention_guard.apply(res.explanation)
     return res

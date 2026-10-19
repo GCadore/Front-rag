@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import ExpectedBox from "@/components/expected-box";
 import TriageResult from "@/components/triage-result";
 import PageHeader from "@/components/page-header";
 import { postJSON } from "@/lib/api";
+import { DEMO_EXAMPLES, type DemoExample } from "@/lib/demo-examples";
 import { useSettings } from "@/lib/settings";
 import type { RagConfig, TriageResult as Triage } from "@/lib/types";
 
@@ -17,6 +19,19 @@ export default function Triagem() {
   const [data, setData] = useState<Triage | null>(null);
   const [used, setUsed] = useState<RagConfig>(config);
   const [error, setError] = useState("");
+  const [example, setExample] = useState<DemoExample | null>(null);
+
+  // Só preenche o formulário; a triagem continua sendo disparada pelo botão
+  function loadExample(id: string) {
+    const ex = DEMO_EXAMPLES.find((e) => e.id === id) ?? null;
+    setExample(ex);
+    setData(null);
+    setError("");
+    if (ex) {
+      setTitle(ex.title);
+      setBody(ex.body);
+    }
+  }
 
   async function run(e: React.FormEvent) {
     e.preventDefault();
@@ -44,6 +59,18 @@ export default function Triagem() {
       <PageHeader title="Triagem" />
 
       <main className="messages triage">
+        <div className="demo-picker">
+          <label htmlFor="demo-example">Carregar exemplo</label>
+          <select id="demo-example" value={example?.id ?? ""} onChange={(e) => loadExample(e.target.value)}>
+            <option value="">Escolha uma issue real do conjunto de teste…</option>
+            {DEMO_EXAMPLES.map((ex) => (
+              <option key={ex.id} value={ex.id}>
+                {ex.kind === "acerto" ? "✅" : "❌"} {ex.id}: {ex.note}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <form className="triage-form" onSubmit={run}>
           <input placeholder="Título da issue" value={title} onChange={(e) => setTitle(e.target.value)} />
           <textarea
@@ -66,6 +93,7 @@ export default function Triagem() {
 
         {error && <div className="error">⚠ {error}</div>}
         {data && <TriageResult data={data} config={used} />}
+        {data && example && <ExpectedBox example={example} result={data} />}
       </main>
     </div>
   );
