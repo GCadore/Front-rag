@@ -314,13 +314,6 @@ class TriageGuarded:
     removed: dict[str, list[Any]] = field(default_factory=dict)
 
 
-def _int_or_none(value: Any) -> int | None:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def related_from_hit(n: int, hit: Hit, reason: str) -> dict[str, Any]:
     """Preenche url/título/tipo SEMPRE pelos metadados, nunca pelo que o modelo escreveu."""
     meta = hit.metadata
@@ -328,7 +321,7 @@ def related_from_hit(n: int, hit: Hit, reason: str) -> dict[str, Any]:
         "n": n,
         "doc_id": hit.doc_id,
         "type": str(meta.get("type", "")),
-        "number": _int_or_none(meta.get("number")),
+        "number": hit.number,  # docs/ADRs têm number=-1 no índice; Hit.number devolve None
         "title": str(meta.get("title", "")),
         "url": str(meta.get("url", "")),
         "state": str(meta.get("state", "")),

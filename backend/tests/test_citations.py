@@ -5,7 +5,7 @@ import json
 
 from fastapi.testclient import TestClient
 
-from rag.guardrails import CitationStreamFilter, normalize_citations, strip_invalid_citations
+from rag.guardrails import CitationStreamFilter, normalize_citations, related_from_hit, strip_invalid_citations
 from rag.retrieval import Hit
 
 RAG_CFG = {"rag": True, "index": "base", "search": "dense", "reranker": False, "guardrails": True, "top_k": 8}
@@ -156,3 +156,9 @@ def test_triage_explanation_running_text(client: TestClient, fake_llm) -> None:
     expected = f"issue #{first['number']}" if first["number"] else f"doc “{first['title']}” [1]"
     assert data["explanation"].startswith(f"A {expected}")
     assert "issue #1 " not in data["explanation"]
+
+
+def test_related_doc_without_number_returns_none() -> None:
+    # Docs vêm do índice com number=-1; o front mostrava "#-1"
+    assert related_from_hit(1, hit("doc-releases/v1.49.0", "doc", -1), "r")["number"] is None
+    assert related_from_hit(1, hit("issue-19545", "issue", 19545), "r")["number"] == 19545
