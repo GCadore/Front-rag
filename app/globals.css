@@ -209,6 +209,39 @@ form.composer { padding: 8px var(--gutter) 18px; }
 .removed { margin-top: 16px; display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .card .sources { margin-top: 14px; max-width: 100%; }
 
+/* Triagem + gabarito: a página é larga, mas fica na coluna de 728px até abrir o gabarito.
+   Aberto, a grade cresce pra 1160px: a resposta vai pra esquerda e o gabarito entra pela direita.
+   O cartão do gabarito já nasce na largura final (cqw), então a coluna só revela ele, sem refluir o texto. */
+.triage { container-type: inline-size; }
+.triage > * { width: 100%; max-width: 728px; margin-inline: auto; }
+.triage-split {
+  --split-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  display: grid; grid-template-columns: 1fr 0fr; column-gap: 0; align-items: start;
+  transition: max-width 0.4s var(--split-ease), grid-template-columns 0.4s var(--split-ease), column-gap 0.4s var(--split-ease);
+}
+.triage > .triage-split.open { max-width: 1160px; grid-template-columns: 1fr 1fr; column-gap: 16px; }
+.split-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.split-side {
+  min-width: 0; overflow: hidden; position: sticky; top: 0;
+  /* Fechado não ocupa altura; ao fechar, só encolhe depois que a coluna some */
+  max-height: 0; opacity: 0; transform: translateX(32px);
+  transition: opacity 0.2s ease-out, transform 0.4s var(--split-ease), max-height 0s linear 0.4s;
+}
+.split-side > * { width: calc((min(1160px, 100cqw) - 16px) / 2); }
+.open .split-side {
+  max-height: 5000px; opacity: 1; transform: none;
+  transition: opacity 0.3s ease-out 0.1s, transform 0.4s var(--split-ease), max-height 0s;
+}
+@media (max-width: 860px) {
+  .triage-split, .triage > .triage-split.open { grid-template-columns: 1fr; row-gap: 16px; transition: none; }
+  .split-side { display: none; position: static; max-height: none; opacity: 1; transform: none; }
+  .split-side > * { width: auto; }
+  .open .split-side { display: block; animation: appear 0.3s ease-out; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .triage-split, .split-side, .open .split-side { transition: none; animation: none; }
+}
+
 /* Animação de envio: o balão do usuário entra de baixo com fade e um leve zoom */
 .msg.user.enter .bubble {
   transform-origin: bottom right;
@@ -317,7 +350,10 @@ form.composer { padding: 8px var(--gutter) 18px; }
 .pill.miss { color: var(--warn); border: 1px solid var(--warn); background: none; }
 .pill.other { color: var(--muted); background: none; border: 1px dashed var(--border); }
 .expected-related { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
-.expected-related li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.expected-related li { display: flex; flex-wrap: nowrap; align-items: baseline; gap: 6px; }
+.expected-related li a { flex: 1; min-width: 0; }
+.expected-related .status-text { white-space: nowrap; }
+.hint { font-size: 12px; margin: 0 0 8px; }
 .expected-related .mark { width: 14px; font-weight: 700; }
 .expected-related li.miss .mark { color: var(--warn); }
 .expected-related li.partial .mark { color: var(--muted); }

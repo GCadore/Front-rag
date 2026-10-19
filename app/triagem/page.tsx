@@ -20,6 +20,7 @@ export default function Triagem() {
   const [used, setUsed] = useState<RagConfig>(config);
   const [error, setError] = useState("");
   const [example, setExample] = useState<DemoExample | null>(null);
+  const [showExpected, setShowExpected] = useState(false);
 
   // Só preenche o formulário; a triagem continua sendo disparada pelo botão
   function loadExample(id: string) {
@@ -27,6 +28,7 @@ export default function Triagem() {
     setExample(ex);
     setData(null);
     setError("");
+    setShowExpected(false);
     if (ex) {
       setTitle(ex.title);
       setBody(ex.body);
@@ -39,6 +41,7 @@ export default function Triagem() {
     setLoading(true);
     setError("");
     setData(null);
+    setShowExpected(false);
     const slowTimer = setTimeout(() => setSlow(true), 12000);
     try {
       // Sem top_k: a API usa o padrão da triagem (10)
@@ -55,7 +58,7 @@ export default function Triagem() {
 
 
   return (
-    <div className="app">
+    <div className="app wide">
       <PageHeader title="Triagem" />
 
       <main className="messages triage">
@@ -92,8 +95,32 @@ export default function Triagem() {
         </form>
 
         {error && <div className="error">⚠ {error}</div>}
-        {data && <TriageResult data={data} config={used} />}
-        {data && example && <ExpectedBox example={example} result={data} />}
+        {data && (
+          // Fechado, a coluna do gabarito tem largura 0; aberto, a resposta vai pra esquerda e o gabarito entra pela direita
+          <div className={`triage-split${showExpected ? " open" : ""}`}>
+            <div className="split-main">
+              <TriageResult data={data} config={used} />
+              {example && (
+                <div className="row">
+                  <button
+                    type="button"
+                    className="ghost"
+                    aria-expanded={showExpected}
+                    aria-controls="expected-panel"
+                    onClick={() => setShowExpected((v) => !v)}
+                  >
+                    {showExpected ? "Ocultar gabarito" : "Ver gabarito"}
+                  </button>
+                </div>
+              )}
+            </div>
+            {example && (
+              <div id="expected-panel" className="split-side" inert={!showExpected} aria-hidden={!showExpected}>
+                <ExpectedBox example={example} result={data} />
+              </div>
+            )}
+          </div>
+        )}
       </main>
     </div>
   );

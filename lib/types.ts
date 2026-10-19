@@ -25,7 +25,7 @@ export const TRIAGE_TOP_K = 10;
 
 export const DEFAULT_CONFIG: RagConfig = {
   rag: true,
-  index: "base",
+  index: "logico",
   search: "hybrid",
   reranker: false, // desligado por padrão: piorou nDCG/MRR na bateria de testes
   guardrails: true,

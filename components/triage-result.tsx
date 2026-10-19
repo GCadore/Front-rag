@@ -41,6 +41,7 @@ export default function TriageResult({ data, config }: { data: Triage; config?: 
       )}
 
       <h3>Labels</h3>
+      <p className="muted hint">Sugeridas pelo modelo, só da lista de labels permitidas. Depois do ponto vem a confiança que ele declarou.</p>
       <div className="labels">
         {data.labels.length ? (
           data.labels.map((l) => (
@@ -54,6 +55,10 @@ export default function TriageResult({ data, config }: { data: Triage; config?: 
       </div>
 
       <h3>Relacionados</h3>
+      <p className="muted hint">
+        Issues e PRs antigos parecidos, tirados dos trechos da busca. [n] é o número do trecho; o score é a nota da busca,
+        que só serve para ordenar.
+      </p>
       {data.related.length ? (
         <ul className="related">
           {data.related.map((r) => (
@@ -79,6 +84,7 @@ export default function TriageResult({ data, config }: { data: Triage; config?: 
       {data.docs.length > 0 && (
         <>
           <h3>Documentação</h3>
+          <p className="muted hint">Páginas da documentação do Backstage que ajudam neste caso.</p>
           <ul className="related">
             {data.docs.map((d) => (
               <li key={`${d.n}-${d.doc_id}`}>
@@ -97,6 +103,7 @@ export default function TriageResult({ data, config }: { data: Triage; config?: 
       )}
 
       <h3>Explicação</h3>
+      <p className="muted hint">Justificativa do modelo. Cada [n] aponta para um dos itens acima.</p>
       <div className="bubble">
         <ReactMarkdown>{data.explanation}</ReactMarkdown>
       </div>

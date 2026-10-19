@@ -28,6 +28,10 @@ export default function ExpectedBox({ example, result }: { example: DemoExample;
       <h3>
         Labels reais · {labelHits} de {labels.length} sugeridas
       </h3>
+      <p className="muted hint">
+        Labels que os mantenedores colocaram no GitHub. ✓ a triagem sugeriu · ✗ não sugeriu · tracejadas são labels de
+        processo (como stale), fora da avaliação.
+      </p>
       <div className="labels">
         {labels.map((l) => (
           <span key={l} className={`pill ${suggested.has(l) ? "hit" : "miss"}`}>
@@ -45,6 +49,12 @@ export default function ExpectedBox({ example, result }: { example: DemoExample;
         Relacionados do gabarito
         {related.length > 0 && ` · ${relatedHits} de ${related.length} na resposta`}
       </h3>
+      {related.length > 0 && (
+        <p className="muted hint">
+          Issues, PRs e docs ligados de verdade a esta issue (links que o autor escreveu). ✓ está na resposta · ~ a busca
+          trouxe, mas o modelo não citou · ✗ a busca não encontrou.
+        </p>
+      )}
       {related.length === 0 ? (
         <p className="muted">Esta issue não tem itens relacionados no gabarito.</p>
       ) : (
